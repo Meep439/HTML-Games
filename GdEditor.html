@@ -1,0 +1,687 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Geometry Dash HTML Editor Pro</title>
+    <style>
+        * { box-sizing: border-box; margin: 0; padding: 0; user-select: none; }
+        body {
+            background-color: #121418;
+            color: #fff;
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            min-height: 100vh;
+        }
+        #ui-container {
+            width: 950px;
+            display: flex;
+            flex-direction: column;
+            gap: 10px;
+        }
+        .header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            background: #1e222b;
+            padding: 10px 15px;
+            border-radius: 8px;
+            border: 1px solid #2e3440;
+        }
+        .header h1 { font-size: 1.2rem; color: #00ffff; text-shadow: 0 0 5px rgba(0,255,255,0.5); }
+        .controls-bar {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 6px;
+            background: #1e222b;
+            padding: 10px;
+            border-radius: 8px;
+            align-items: center;
+            border: 1px solid #2e3440;
+        }
+        .btn {
+            background: #2b303c;
+            color: #fff;
+            border: 1px solid #434c5e;
+            padding: 6px 12px;
+            border-radius: 4px;
+            cursor: pointer;
+            font-weight: bold;
+            font-size: 0.85rem;
+            transition: all 0.2s;
+        }
+        .btn:hover:not(:disabled) { background: #3b4252; }
+        .btn:disabled { opacity: 0.4; cursor: not-allowed; }
+        .btn.active {
+            background: #00ffff;
+            color: #121418;
+            border-color: #00ffff;
+            box-shadow: 0 0 8px rgba(0,255,255,0.6);
+        }
+        .btn-mode { background: #a3be8c; color: #121418; }
+        .btn-mode.play-active { background: #ebcb8b; }
+        .divider { width: 1px; height: 24px; background: #434c5e; margin: 0 4px; }
+
+        #canvas-wrapper {
+            position: relative;
+            width: 950px;
+            height: 450px;
+            border: 2px solid #2e3440;
+            border-radius: 8px;
+            overflow: hidden;
+            box-shadow: 0 8px 20px rgba(0,0,0,0.6);
+        }
+        canvas { background: #0f1115; display: block; }
+        .instructions {
+            background: #1e222b;
+            padding: 10px 15px;
+            border-radius: 8px;
+            font-size: 0.82rem;
+            color: #d8dee9;
+            border: 1px solid #2e3440;
+            display: flex;
+            justify-content: space-between;
+        }
+    </style>
+</head>
+<body>
+
+<div id="ui-container">
+    <div class="header">
+        <h1>Geometry Dash Editor Pro</h1>
+        <div style="display: flex; gap: 8px;">
+            <button id="autoEditBtn" class="btn">Auto-Edit on Death: ON</button>
+            <button id="hitboxToggleBtn" class="btn">Hitbox Trail: OFF</button>
+            <button id="clearTrailBtn" class="btn">Clear Trail</button>
+            <button id="modeBtn" class="btn btn-mode">Mode: EDIT</button>
+        </div>
+    </div>
+
+    <div class="controls-bar">
+        <span>Place:</span>
+        <button class="btn active" data-tool="block">Block</button>
+        <button class="btn" data-tool="spike">Spike</button>
+        <button class="btn" data-tool="pad">Pad</button>
+        <button class="btn" data-tool="orb">Orb</button>
+        <button class="btn" data-tool="eraser">Eraser</button>
+        
+        <div class="divider"></div>
+        <span>Tools:</span>
+        <button class="btn" data-tool="pan">Pan Canvas</button>
+        <button class="btn" data-tool="drag">Free Drag</button>
+        <button class="btn" data-tool="nudge">Micro-Move</button>
+        
+        <div class="divider"></div>
+        <span>History:</span>
+        <button id="undoBtn" class="btn" disabled>Undo</button>
+        <button id="redoBtn" class="btn" disabled>Redo</button>
+
+        <div class="divider"></div>
+        <span>Zoom:</span>
+        <button id="zoomOutBtn" class="btn">-</button>
+        <span id="zoomLevelText" style="font-size:0.85rem; font-weight:bold; min-width: 45px; text-align: center;">100%</span>
+        <button id="zoomInBtn" class="btn">+</button>
+        <button id="resetViewBtn" class="btn">Reset View</button>
+
+        <button id="clearBtn" class="btn" style="margin-left: auto; background: #bf616a;">Clear Level</button>
+    </div>
+
+    <div id="canvas-wrapper">
+        <canvas id="gameCanvas" width="950" height="450"></canvas>
+    </div>
+
+    <div class="instructions">
+        <span><b>Camera:</b> Smoothly tracks player X and Y during playtesting.</span>
+        <span><b>Pan:</b> Right-Click & Drag in Edit mode.</span>
+    </div>
+</div>
+
+<script>
+const canvas = document.getElementById('gameCanvas');
+const ctx = canvas.getContext('2d');
+
+const TILE_SIZE = 30;
+const FLOOR_Y = 390;
+
+// View State
+let cameraX = 0;
+let cameraY = 0;
+let zoom = 1.0;
+
+// Game State
+let isPlayMode = false;
+let currentTool = 'block';
+let isMouseDown = false;
+let isPanning = false;
+let showHitboxTrail = false;
+let autoEditOnDeath = true;
+let lastMouseScreen = { x: 0, y: 0 };
+
+// Object Selection / Micro-Move State
+let selectedObject = null;
+
+// Free Drag State
+let draggedObject = null;
+let dragOffset = { x: 0, y: 0 };
+
+// Player Trail
+let playerTrail = [];
+
+// Level Data
+let levelObjects = [];
+
+// History Stacks
+let undoStack = [];
+let redoStack = [];
+const MAX_HISTORY = 50;
+
+function saveHistoryState() {
+    undoStack.push(JSON.stringify(levelObjects));
+    if (undoStack.length > MAX_HISTORY) undoStack.shift();
+    redoStack = [];
+    updateUndoRedoUI();
+}
+
+function undo() {
+    if (undoStack.length === 0 || isPlayMode) return;
+    redoStack.push(JSON.stringify(levelObjects));
+    levelObjects = JSON.parse(undoStack.pop());
+    selectedObject = null;
+    draggedObject = null;
+    updateUndoRedoUI();
+}
+
+function redo() {
+    if (redoStack.length === 0 || isPlayMode) return;
+    undoStack.push(JSON.stringify(levelObjects));
+    levelObjects = JSON.parse(redoStack.pop());
+    selectedObject = null;
+    draggedObject = null;
+    updateUndoRedoUI();
+}
+
+function updateUndoRedoUI() {
+    document.getElementById('undoBtn').disabled = undoStack.length === 0;
+    document.getElementById('redoBtn').disabled = redoStack.length === 0;
+}
+
+// Player Physics
+let player = {
+    x: 50,
+    y: FLOOR_Y - TILE_SIZE,
+    vx: 5,
+    vy: 0,
+    width: TILE_SIZE,
+    height: TILE_SIZE,
+    rotation: 0,
+    grounded: false
+};
+
+const GRAVITY = 0.85;
+const JUMP_FORCE = -12;
+const PAD_FORCE = -16;
+const ORB_FORCE = -12;
+
+let spacePressed = false;
+
+// Helpers
+function getWorldPos(e) {
+    const rect = canvas.getBoundingClientRect();
+    const screenX = e.clientX - rect.left;
+    const screenY = e.clientY - rect.top;
+    return {
+        x: (screenX / zoom) + cameraX,
+        y: (screenY / zoom) + cameraY,
+        screenX,
+        screenY
+    };
+}
+
+function updateCursor() {
+    if (currentTool === 'pan') canvas.style.cursor = 'grab';
+    else if (currentTool === 'drag') canvas.style.cursor = 'move';
+    else if (currentTool === 'nudge') canvas.style.cursor = 'pointer';
+    else canvas.style.cursor = 'crosshair';
+}
+
+canvas.addEventListener('contextmenu', (e) => e.preventDefault());
+
+// Event Listeners
+window.addEventListener('keydown', (e) => {
+    if ((e.ctrlKey || e.metaKey) && !isPlayMode) {
+        if (e.key.toLowerCase() === 'z') {
+            e.preventDefault();
+            if (e.shiftKey) redo();
+            else undo();
+            return;
+        } else if (e.key.toLowerCase() === 'y') {
+            e.preventDefault();
+            redo();
+            return;
+        }
+    }
+
+    if (e.code === 'Space' || e.code === 'ArrowUp') {
+        if (isPlayMode) {
+            if (!spacePressed) handleJumpInput();
+            spacePressed = true;
+            return;
+        }
+    }
+
+    if (!isPlayMode && currentTool === 'nudge' && selectedObject) {
+        const step = e.shiftKey ? 5 : 1;
+        let handled = false;
+
+        if (['ArrowLeft', 'a', 'A', 'ArrowRight', 'd', 'D', 'ArrowUp', 'w', 'W', 'ArrowDown', 's', 'S'].includes(e.key)) {
+            saveHistoryState();
+        }
+
+        if (e.key === 'ArrowLeft' || e.key === 'a' || e.key === 'A') { selectedObject.x -= step; handled = true; }
+        if (e.key === 'ArrowRight' || e.key === 'd' || e.key === 'D') { selectedObject.x += step; handled = true; }
+        if (e.key === 'ArrowUp' || e.key === 'w' || e.key === 'W') { selectedObject.y -= step; handled = true; }
+        if (e.key === 'ArrowDown' || e.key === 's' || e.key === 'S') { selectedObject.y += step; handled = true; }
+
+        if (handled) e.preventDefault();
+    }
+});
+
+window.addEventListener('keyup', (e) => {
+    if (e.code === 'Space' || e.code === 'ArrowUp') spacePressed = false;
+});
+
+canvas.addEventListener('mousedown', (e) => {
+    const pos = getWorldPos(e);
+    isMouseDown = true;
+    lastMouseScreen = { x: e.clientX, y: e.clientY };
+
+    if (e.button === 2 || e.button === 1 || currentTool === 'pan') {
+        isPanning = true;
+        canvas.style.cursor = 'grabbing';
+        return;
+    }
+
+    if (isPlayMode) {
+        handleJumpInput();
+        return;
+    }
+
+    saveHistoryState();
+
+    if (currentTool === 'nudge') {
+        selectedObject = null;
+        for (let i = levelObjects.length - 1; i >= 0; i--) {
+            let obj = levelObjects[i];
+            if (pos.x >= obj.x && pos.x <= obj.x + TILE_SIZE &&
+                pos.y >= obj.y && pos.y <= obj.y + TILE_SIZE) {
+                selectedObject = obj;
+                break;
+            }
+        }
+    } else if (currentTool === 'drag') {
+        for (let i = levelObjects.length - 1; i >= 0; i--) {
+            let obj = levelObjects[i];
+            if (pos.x >= obj.x && pos.x <= obj.x + TILE_SIZE &&
+                pos.y >= obj.y && pos.y <= obj.y + TILE_SIZE) {
+                draggedObject = obj;
+                dragOffset.x = pos.x - obj.x;
+                dragOffset.y = pos.y - obj.y;
+                break;
+            }
+        }
+    } else {
+        selectedObject = null;
+        handleEditorInput(pos);
+    }
+});
+
+canvas.addEventListener('mousemove', (e) => {
+    const pos = getWorldPos(e);
+
+    if (isPanning) {
+        const dx = e.clientX - lastMouseScreen.x;
+        const dy = e.clientY - lastMouseScreen.y;
+        cameraX -= dx / zoom;
+        cameraY -= dy / zoom;
+        lastMouseScreen = { x: e.clientX, y: e.clientY };
+        return;
+    }
+
+    if (!isPlayMode && isMouseDown) {
+        if (currentTool === 'drag' && draggedObject) {
+            draggedObject.x = pos.x - dragOffset.x;
+            draggedObject.y = pos.y - dragOffset.y;
+        } else if (currentTool !== 'pan' && currentTool !== 'nudge') {
+            handleEditorInput(pos);
+        }
+    }
+});
+
+window.addEventListener('mouseup', () => {
+    isMouseDown = false;
+    isPanning = false;
+    draggedObject = null;
+    updateCursor();
+});
+
+canvas.addEventListener('wheel', (e) => {
+    e.preventDefault();
+    const zoomFactor = e.deltaY < 0 ? 1.15 : 0.85;
+    setZoom(zoom * zoomFactor);
+});
+
+// UI Controls
+document.querySelectorAll('.controls-bar .btn[data-tool]').forEach(btn => {
+    btn.addEventListener('click', () => {
+        document.querySelectorAll('.controls-bar .btn[data-tool]').forEach(b => b.classList.remove('active'));
+        btn.classList.add('active');
+        currentTool = btn.dataset.tool;
+        if (currentTool !== 'nudge') selectedObject = null;
+        updateCursor();
+    });
+});
+
+document.getElementById('undoBtn').addEventListener('click', undo);
+document.getElementById('redoBtn').addEventListener('click', redo);
+
+const modeBtn = document.getElementById('modeBtn');
+modeBtn.addEventListener('click', toggleMode);
+
+const autoEditBtn = document.getElementById('autoEditBtn');
+autoEditBtn.addEventListener('click', () => {
+    autoEditOnDeath = !autoEditOnDeath;
+    autoEditBtn.textContent = `Auto-Edit on Death: ${autoEditOnDeath ? 'ON' : 'OFF'}`;
+    autoEditBtn.style.background = autoEditOnDeath ? '#2b303c' : '#bf616a';
+});
+
+const hitboxToggleBtn = document.getElementById('hitboxToggleBtn');
+hitboxToggleBtn.addEventListener('click', () => {
+    showHitboxTrail = !showHitboxTrail;
+    hitboxToggleBtn.textContent = `Hitbox Trail: ${showHitboxTrail ? 'ON' : 'OFF'}`;
+    hitboxToggleBtn.style.background = showHitboxTrail ? '#bf616a' : '#2b303c';
+});
+
+document.getElementById('zoomInBtn').addEventListener('click', () => setZoom(zoom * 1.2));
+document.getElementById('zoomOutBtn').addEventListener('click', () => setZoom(zoom / 1.2));
+document.getElementById('resetViewBtn').addEventListener('click', () => {
+    zoom = 1.0;
+    cameraX = 0;
+    cameraY = 0;
+    document.getElementById('zoomLevelText').textContent = '100%';
+});
+
+document.getElementById('clearTrailBtn').addEventListener('click', () => playerTrail = []);
+document.getElementById('clearBtn').addEventListener('click', () => {
+    if (confirm("Clear all level elements?")) {
+        saveHistoryState();
+        levelObjects = [];
+        playerTrail = [];
+        selectedObject = null;
+    }
+});
+
+function setZoom(newZoom) {
+    zoom = Math.min(Math.max(newZoom, 0.4), 2.5);
+    document.getElementById('zoomLevelText').textContent = Math.round(zoom * 100) + '%';
+}
+
+function toggleMode() {
+    isPlayMode = !isPlayMode;
+    if (isPlayMode) {
+        modeBtn.textContent = 'Mode: PLAYTEST';
+        modeBtn.classList.add('play-active');
+        startNewAttempt();
+    } else {
+        modeBtn.textContent = 'Mode: EDIT';
+        modeBtn.classList.remove('play-active');
+    }
+}
+
+function resetPlayerPhysics() {
+    player.x = 50;
+    player.y = FLOOR_Y - TILE_SIZE;
+    player.vy = 0;
+    player.rotation = 0;
+    player.grounded = true;
+}
+
+function startNewAttempt() {
+    playerTrail = [];
+    resetPlayerPhysics();
+}
+
+function handlePlayerDeath() {
+    resetPlayerPhysics();
+
+    if (autoEditOnDeath) {
+        isPlayMode = false;
+        modeBtn.textContent = 'Mode: EDIT';
+        modeBtn.classList.remove('play-active');
+    } else {
+        startNewAttempt();
+    }
+}
+
+function handleEditorInput(pos) {
+    if (pos.y >= FLOOR_Y) return;
+
+    const gridX = Math.floor(pos.x / TILE_SIZE) * TILE_SIZE;
+    const gridY = Math.floor(pos.y / TILE_SIZE) * TILE_SIZE;
+
+    const index = levelObjects.findIndex(o => Math.abs(o.x - gridX) < 2 && Math.abs(o.y - gridY) < 2);
+
+    if (currentTool === 'eraser') {
+        if (index !== -1) levelObjects.splice(index, 1);
+    } else if (['block', 'spike', 'pad', 'orb'].includes(currentTool)) {
+        if (index !== -1) levelObjects.splice(index, 1);
+        levelObjects.push({ x: gridX, y: gridY, type: currentTool });
+    }
+}
+
+function handleJumpInput() {
+    let hitOrb = false;
+    for (let obj of levelObjects) {
+        if (obj.type === 'orb') {
+            const dx = (player.x + player.width/2) - (obj.x + TILE_SIZE/2);
+            const dy = (player.y + player.height/2) - (obj.y + TILE_SIZE/2);
+            if (Math.sqrt(dx*dx + dy*dy) < TILE_SIZE * 1.3) {
+                player.vy = ORB_FORCE;
+                hitOrb = true;
+                break;
+            }
+        }
+    }
+
+    if (!hitOrb && player.grounded) {
+        player.vy = JUMP_FORCE;
+        player.grounded = false;
+    }
+}
+
+// Game Loop
+function update() {
+    if (isPlayMode) {
+        player.x += player.vx;
+
+        // Smooth Camera Follow System (X and Y tracking)
+        const targetCamX = player.x - 200;
+        const targetCamY = (player.y + player.height / 2) - ((canvas.height / zoom) / 2);
+
+        // Smooth interpolation (lerp) for smooth tracking
+        cameraX += (targetCamX - cameraX) * 0.15;
+        cameraY += (targetCamY - cameraY) * 0.1;
+
+        player.vy += GRAVITY;
+        player.y += player.vy;
+
+        playerTrail.push({
+            x: player.x,
+            y: player.y,
+            width: player.width,
+            height: player.height,
+            centerX: player.x + player.width / 2,
+            centerY: player.y + player.height / 2
+        });
+
+        if (player.y + player.height >= FLOOR_Y) {
+            player.y = FLOOR_Y - player.height;
+            player.vy = 0;
+            player.grounded = true;
+        } else {
+            player.grounded = false;
+        }
+
+        player.rotation += player.grounded ? 0 : 8;
+        if (player.grounded) player.rotation = Math.round(player.rotation / 90) * 90;
+
+        for (let obj of levelObjects) {
+            if (obj.type === 'block') {
+                if (player.x < obj.x + TILE_SIZE && player.x + player.width > obj.x &&
+                    player.y < obj.y + TILE_SIZE && player.y + player.height > obj.y) {
+                    
+                    if (player.vy > 0 && (player.y + player.height - player.vy) <= obj.y + 5) {
+                        player.y = obj.y - player.height;
+                        player.vy = 0;
+                        player.grounded = true;
+                    } else {
+                        handlePlayerDeath();
+                    }
+                }
+            } else if (obj.type === 'spike') {
+                const pad = 6;
+                if (player.x + pad < obj.x + TILE_SIZE && player.x + player.width - pad > obj.x &&
+                    player.y + pad < obj.y + TILE_SIZE && player.y + player.height > obj.y) {
+                    handlePlayerDeath();
+                }
+            } else if (obj.type === 'pad') {
+                if (player.x < obj.x + TILE_SIZE && player.x + player.width > obj.x &&
+                    player.y + player.height >= obj.y + 12 && player.y < obj.y + TILE_SIZE) {
+                    player.vy = PAD_FORCE;
+                    player.grounded = false;
+                }
+            }
+        }
+    }
+
+    render();
+    requestAnimationFrame(update);
+}
+
+function render() {
+    ctx.fillStyle = '#0f1115';
+    ctx.fillRect(0, 0, canvas.width, canvas.height);
+
+    ctx.save();
+    ctx.scale(zoom, zoom);
+    ctx.translate(-cameraX, -cameraY);
+
+    if (!isPlayMode) {
+        ctx.strokeStyle = '#1a1e28';
+        ctx.lineWidth = 1;
+        const startX = Math.floor(cameraX / TILE_SIZE) * TILE_SIZE - TILE_SIZE;
+        const endX = cameraX + (canvas.width / zoom) + TILE_SIZE;
+        const startY = Math.floor(cameraY / TILE_SIZE) * TILE_SIZE - TILE_SIZE;
+        const endY = cameraY + (canvas.height / zoom) + TILE_SIZE;
+
+        for (let x = startX; x < endX; x += TILE_SIZE) {
+            ctx.beginPath(); ctx.moveTo(x, startY); ctx.lineTo(x, endY); ctx.stroke();
+        }
+        for (let y = startY; y < endY; y += TILE_SIZE) {
+            ctx.beginPath(); ctx.moveTo(startX, y); ctx.lineTo(endX, y); ctx.stroke();
+        }
+    }
+
+    ctx.fillStyle = '#1e222b';
+    ctx.fillRect(cameraX - 1000, FLOOR_Y, (canvas.width / zoom) + 2000, 2000);
+    ctx.strokeStyle = '#00ffff';
+    ctx.lineWidth = 2;
+    ctx.beginPath();
+    ctx.moveTo(cameraX - 1000, FLOOR_Y);
+    ctx.lineTo(cameraX + (canvas.width / zoom) + 1000, FLOOR_Y);
+    ctx.stroke();
+
+    if (playerTrail.length > 1) {
+        ctx.beginPath();
+        ctx.strokeStyle = 'rgba(0, 255, 255, 0.6)';
+        ctx.lineWidth = 3 / zoom;
+        ctx.setLineDash([6 / zoom, 4 / zoom]);
+        ctx.moveTo(playerTrail[0].centerX, playerTrail[0].centerY);
+        for (let i = 1; i < playerTrail.length; i++) {
+            ctx.lineTo(playerTrail[i].centerX, playerTrail[i].centerY);
+        }
+        ctx.stroke();
+        ctx.setLineDash([]);
+
+        if (showHitboxTrail) {
+            ctx.strokeStyle = 'rgba(255, 70, 70, 0.6)';
+            ctx.lineWidth = 1 / zoom;
+            for (let i = 0; i < playerTrail.length; i += 4) {
+                const p = playerTrail[i];
+                ctx.strokeRect(p.x, p.y, p.width, p.height);
+            }
+        }
+    }
+
+    for (let obj of levelObjects) {
+        if (obj.type === 'block') {
+            ctx.fillStyle = '#181b22';
+            ctx.fillRect(obj.x, obj.y, TILE_SIZE, TILE_SIZE);
+            ctx.strokeStyle = '#00ffff';
+            ctx.lineWidth = 2;
+            ctx.strokeRect(obj.x + 1, obj.y + 1, TILE_SIZE - 2, TILE_SIZE - 2);
+        } else if (obj.type === 'spike') {
+            ctx.fillStyle = '#bf616a';
+            ctx.beginPath();
+            ctx.moveTo(obj.x, obj.y + TILE_SIZE);
+            ctx.lineTo(obj.x + TILE_SIZE / 2, obj.y);
+            ctx.lineTo(obj.x + TILE_SIZE, obj.y + TILE_SIZE);
+            ctx.closePath();
+            ctx.fill();
+            ctx.strokeStyle = '#d08770';
+            ctx.stroke();
+        } else if (obj.type === 'pad') {
+            ctx.fillStyle = '#ebcb8b';
+            ctx.fillRect(obj.x + 3, obj.y + TILE_SIZE - 8, TILE_SIZE - 6, 8);
+            ctx.strokeStyle = '#d08770';
+            ctx.strokeRect(obj.x + 3, obj.y + TILE_SIZE - 8, TILE_SIZE - 6, 8);
+        } else if (obj.type === 'orb') {
+            ctx.fillStyle = '#ebcb8b';
+            ctx.beginPath();
+            ctx.arc(obj.x + TILE_SIZE/2, obj.y + TILE_SIZE/2, 9, 0, Math.PI * 2);
+            ctx.fill();
+            ctx.strokeStyle = '#fff';
+            ctx.lineWidth = 2;
+            ctx.stroke();
+        }
+
+        if (!isPlayMode && selectedObject === obj) {
+            ctx.strokeStyle = '#00ffff';
+            ctx.lineWidth = 2;
+            ctx.setLineDash([4, 2]);
+            ctx.strokeRect(obj.x - 3, obj.y - 3, TILE_SIZE + 6, TILE_SIZE + 6);
+            ctx.setLineDash([]);
+        }
+    }
+
+    ctx.save();
+    ctx.translate(player.x + player.width / 2, player.y + player.height / 2);
+    ctx.rotate((player.rotation * Math.PI) / 180);
+    ctx.fillStyle = '#ebcb8b';
+    ctx.fillRect(-player.width / 2, -player.height / 2, player.width, player.height);
+    ctx.strokeStyle = '#d08770';
+    ctx.lineWidth = 2;
+    ctx.strokeRect(-player.width / 2, -player.height / 2, player.width, player.height);
+    ctx.fillStyle = '#121418';
+    ctx.fillRect(-6, -6, 12, 12);
+    ctx.restore();
+
+    ctx.restore();
+}
+
+update();
+</script>
+</body>
+</html>
