@@ -1,1 +1,380 @@
-text advenure game
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Text Adventure Game</title>
+    <style>
+        body {
+            background-color: #000000;
+            color: #ffffff;
+            font-family: 'Courier New', monospace;
+            margin: 0;
+            padding: 20px;
+            line-height: 1.6;
+        }
+        #gameContainer {
+            max-width: 800px;
+            margin: 0 auto;
+            border: 2px solid #ffffff;
+            padding: 20px;
+            min-height: 500px;
+        }
+        #output {
+            min-height: 300px;
+            margin-bottom: 20px;
+            white-space: pre-wrap;
+            word-wrap: break-word;
+        }
+        .inventory {
+            border-top: 2px solid #ffffff;
+            padding-top: 10px;
+            margin-top: 10px;
+            margin-bottom: 10px;
+        }
+        input {
+            background-color: #000000;
+            color: #ffffff;
+            border: 1px solid #ffffff;
+            padding: 10px;
+            font-family: 'Courier New', monospace;
+            font-size: 14px;
+            width: 100%;
+            box-sizing: border-box;
+        }
+        button {
+            background-color: #ffffff;
+            color: #000000;
+            border: 1px solid #ffffff;
+            padding: 10px 20px;
+            cursor: pointer;
+            font-family: 'Courier New', monospace;
+            font-size: 14px;
+            margin-top: 10px;
+        }
+        button:hover {
+            background-color: #cccccc;
+        }
+        .help-text {
+            font-size: 12px;
+            color: #cccccc;
+            margin-top: 10px;
+        }
+    </style>
+</head>
+<body>
+    <div id="gameContainer">
+        <h1>TEXT ADVENTURE GAME</h1>
+        <div id="output"></div>
+        <div class="inventory" id="inventory"></div>
+        <input type="text" id="commandInput" placeholder="Enter command...">
+        <button onclick="submitCommand()">Execute</button>
+        <div class="help-text">
+            Commands: GO (direction), TAKE (item), DROP (item), INSPECT (target), INVENTORY, LOOK, HELP, QUIT
+        </div>
+    </div>
+
+    <script>
+        // Game State
+        let gameState = {
+            currentRoom: 0,
+            inventory: [],
+            visited: new Set(),
+            world: [],
+            gameOver: false
+        };
+
+        // World Generation
+        const roomTypes = ['forest', 'cave', 'ruins', 'clearing', 'stream', 'mountain', 'temple'];
+        const items = [
+            { name: 'torch', value: 10, description: 'a flickering torch' },
+            { name: 'key', value: 25, description: 'an ancient key' },
+            { name: 'coin', value: 5, description: 'a golden coin' },
+            { name: 'scroll', value: 15, description: 'a dusty scroll' },
+            { name: 'rope', value: 12, description: 'a coil of rope' },
+            { name: 'gem', value: 50, description: 'a sparkling gem' },
+            { name: 'potion', value: 20, description: 'a mysterious potion' },
+            { name: 'shield', value: 30, description: 'a dented shield' }
+        ];
+
+        const directions = ['north', 'south', 'east', 'west'];
+
+        function getRandomItem(arr) {
+            return arr[Math.floor(Math.random() * arr.length)];
+        }
+
+        function generateRoom(id) {
+            const type = getRandomItem(roomTypes);
+            const hasItem = Math.random() > 0.5;
+            const item = hasItem ? { ...getRandomItem(items) } : null;
+            const exits = {};
+
+            directions.forEach(dir => {
+                if (Math.random() > 0.3) {
+                    exits[dir] = Math.floor(Math.random() * 100); // Random room ID
+                }
+            });
+
+            return {
+                id: id,
+                type: type,
+                item: item,
+                exits: exits,
+                description: getDescription(type)
+            };
+        }
+
+        function getDescription(type) {
+            const descriptions = {
+                forest: 'You are in a dense forest. Tall trees tower above you, blocking most of the light.',
+                cave: 'You stand in a dark cave. Water drips echoing from somewhere in the distance.',
+                ruins: 'Ancient ruins surround you. Crumbling stone structures hint at a forgotten civilization.',
+                clearing: 'A small clearing opens before you. Grass and wildflowers sway in the breeze.',
+                stream: 'A gentle stream flows nearby. The sound of water is soothing and peaceful.',
+                mountain: 'You are on a rocky mountain slope. The wind is cold and sharp up here.',
+                temple: 'A massive stone temple stands before you. Strange symbols cover its walls.'
+            };
+            return descriptions[type] || 'You are in an unknown place.';
+        }
+
+        function generateWorld() {
+            gameState.world = [];
+            for (let i = 0; i < 10; i++) {
+                gameState.world.push(generateRoom(i));
+            }
+            gameState.currentRoom = 0;
+            gameState.visited.add(0);
+        }
+
+        // UI Functions
+        function appendOutput(text) {
+            const output = document.getElementById('output');
+            output.textContent += text + '\n';
+            output.scrollTop = output.scrollHeight;
+        }
+
+        function clearOutput() {
+            document.getElementById('output').textContent = '';
+        }
+
+        function updateInventoryDisplay() {
+            const invDiv = document.getElementById('inventory');
+            if (gameState.inventory.length === 0) {
+                invDiv.innerHTML = '<strong>Inventory:</strong> (empty)';
+            } else {
+                const items = gameState.inventory.map(item => item.name).join(', ');
+                invDiv.innerHTML = '<strong>Inventory:</strong> ' + items;
+            }
+        }
+
+        // Game Commands
+        function handleCommand(input) {
+            const parts = input.toLowerCase().trim().split(' ');
+            const command = parts[0];
+            const arg = parts.slice(1).join(' ');
+
+            switch (command) {
+                case 'look':
+                    cmdLook();
+                    break;
+                case 'go':
+                    cmdGo(arg);
+                    break;
+                case 'take':
+                    cmdTake(arg);
+                    break;
+                case 'drop':
+                    cmdDrop(arg);
+                    break;
+                case 'inspect':
+                    cmdInspect(arg);
+                    break;
+                case 'inventory':
+                    cmdInventory();
+                    break;
+                case 'help':
+                    cmdHelp();
+                    break;
+                case 'quit':
+                    cmdQuit();
+                    break;
+                default:
+                    appendOutput('Unknown command: "' + command + '". Type HELP for available commands.');
+            }
+        }
+
+        function cmdLook() {
+            const room = gameState.world[gameState.currentRoom];
+            let text = '\n=== ' + room.type.toUpperCase() + ' ===\n';
+            text += room.description + '\n';
+
+            if (room.exits && Object.keys(room.exits).length > 0) {
+                const exits = Object.keys(room.exits);
+                text += 'Exits: ' + exits.join(', ') + '\n';
+            }
+
+            if (room.item) {
+                text += 'You see ' + room.item.description + ' here.\n';
+            }
+
+            appendOutput(text);
+        }
+
+        function cmdGo(direction) {
+            if (!direction) {
+                appendOutput('Go where? Specify a direction: north, south, east, west.');
+                return;
+            }
+
+            const room = gameState.world[gameState.currentRoom];
+            if (!room.exits || !room.exits[direction]) {
+                appendOutput('You cannot go ' + direction + ' from here.');
+                return;
+            }
+
+            gameState.currentRoom = room.exits[direction];
+            gameState.visited.add(gameState.currentRoom);
+            appendOutput('You travel ' + direction + '...\n');
+            cmdLook();
+        }
+
+        function cmdTake(item) {
+            if (!item) {
+                appendOutput('Take what? Specify an item.');
+                return;
+            }
+
+            const room = gameState.world[gameState.currentRoom];
+            if (!room.item || room.item.name !== item) {
+                appendOutput('You don\'t see "' + item + '" here.');
+                return;
+            }
+
+            gameState.inventory.push(room.item);
+            appendOutput('You took ' + room.item.description + '.');
+            room.item = null;
+            updateInventoryDisplay();
+        }
+
+        function cmdDrop(item) {
+            if (!item) {
+                appendOutput('Drop what? Specify an item from your inventory.');
+                return;
+            }
+
+            const index = gameState.inventory.findIndex(i => i.name === item);
+            if (index === -1) {
+                appendOutput('You don\'t have "' + item + '" in your inventory.');
+                return;
+            }
+
+            const droppedItem = gameState.inventory.splice(index, 1)[0];
+            const room = gameState.world[gameState.currentRoom];
+            room.item = droppedItem;
+            appendOutput('You dropped ' + droppedItem.description + '.');
+            updateInventoryDisplay();
+        }
+
+        function cmdInspect(target) {
+            if (!target) {
+                appendOutput('Inspect what?');
+                return;
+            }
+
+            const room = gameState.world[gameState.currentRoom];
+
+            // Check inventory
+            const invItem = gameState.inventory.find(i => i.name === target);
+            if (invItem) {
+                appendOutput('You examine ' + invItem.description + '. It looks valuable. (Worth ' + invItem.value + ' points)');
+                return;
+            }
+
+            // Check room item
+            if (room.item && room.item.name === target) {
+                appendOutput('You examine ' + room.item.description + '. It looks valuable. (Worth ' + room.item.value + ' points)');
+                return;
+            }
+
+            // Check surroundings
+            if (target === 'surroundings' || target === 'room') {
+                cmdLook();
+                return;
+            }
+
+            appendOutput('You don\'t see anything called "' + target + '" here.');
+        }
+
+        function cmdInventory() {
+            if (gameState.inventory.length === 0) {
+                appendOutput('Your inventory is empty.');
+                return;
+            }
+
+            let text = '\n=== YOUR INVENTORY ===\n';
+            let totalValue = 0;
+            gameState.inventory.forEach(item => {
+                text += '- ' + item.name + ' (worth ' + item.value + ' points)\n';
+                totalValue += item.value;
+            });
+            text += '\nTotal value: ' + totalValue + ' points';
+            appendOutput(text);
+        }
+
+        function cmdHelp() {
+            const helpText = `
+=== AVAILABLE COMMANDS ===
+LOOK           - Examine your current location
+GO [direction] - Move in a direction (north, south, east, west)
+TAKE [item]    - Pick up an item
+DROP [item]    - Drop an item from your inventory
+INSPECT [item] - Examine an item closely
+INVENTORY      - Check what you're carrying
+HELP           - Show this message
+QUIT           - End the game
+`;
+            appendOutput(helpText);
+        }
+
+        function cmdQuit() {
+            gameState.gameOver = true;
+            appendOutput('\nThanks for playing!');
+            document.getElementById('commandInput').disabled = true;
+        }
+
+        // Main Game Loop
+        function submitCommand() {
+            if (gameState.gameOver) return;
+
+            const input = document.getElementById('commandInput').value.trim();
+            if (!input) return;
+
+            appendOutput('> ' + input);
+            handleCommand(input);
+            document.getElementById('commandInput').value = '';
+            document.getElementById('commandInput').focus();
+        }
+
+        function initGame() {
+            clearOutput();
+            generateWorld();
+            appendOutput('=== TEXT ADVENTURE GAME ===\n');
+            appendOutput('Welcome, adventurer! You find yourself in a strange land.\n');
+            appendOutput('Type HELP for a list of commands.\n');
+            cmdLook();
+            updateInventoryDisplay();
+            document.getElementById('commandInput').focus();
+        }
+
+        // Allow Enter key to submit
+        document.getElementById('commandInput').addEventListener('keypress', function(e) {
+            if (e.key === 'Enter') {
+                submitCommand();
+            }
+        });
+
+        // Start the game when page loads
+        window.addEventListener('load', initGame);
+    </script>
+</body>
+</html>
