@@ -1,0 +1,883 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>First Person Maze - Single-floor</title>
+  <style>
+    html,body{height:100%;margin:0;background:#000;color:#fff;font-family:sans-serif}
+    canvas{display:block}
+    #ui{position:fixed;left:10px;top:10px;z-index:30}
+    /* hide the in-maze help overlay */
+    #help{display:none}
+    #mapToggle{position:fixed;right:10px;top:10px;z-index:30;padding:8px;border-radius:6px;background:rgba(0,0,0,0.5);}
+    .hud{position:fixed;left:10px;top:70px;z-index:30;background:rgba(0,0,0,0.35);padding:8px;border-radius:6px}
+    /* Mobile controls */
+    .joystick{position:fixed;left:22px;bottom:22px;width:120px;height:120px;border-radius:50%;background:rgba(255,255,255,0.06);touch-action:none;z-index:31}
+    .stick{position:absolute;left:50%;top:50%;width:44px;height:44px;margin:-22px;border-radius:50%;background:rgba(255,255,255,0.2)}
+    .leftSideMove{position:fixed;left:0;top:0;width:50vw;height:100%;touch-action:none;z-index:15}
+    .lookPad{position:fixed;right:22px;bottom:22px;left:60px;height:40vh;border-radius:12px;background:transparent;touch-action:none;z-index:31}
+    .btn{position:fixed;right:22px;top:80px;padding:10px;background:rgba(255,255,255,0.06);border-radius:8px;z-index:31}
+    .actionBtn{position:fixed;right:22px;bottom:22px;padding:12px;background:rgba(255,200,0,0.12);border-radius:12px;z-index:31}
+    #message{position:fixed;left:50%;top:10px;transform:translateX(-50%);background:rgba(0,0,0,0.6);padding:8px;border-radius:6px;z-index:40;display:none}
+    #credits{position:fixed;left:10px;bottom:10px;font-size:12px;opacity:.6;z-index:30}
+    
+    /* Start screen */
+    #startScreen{position:fixed;top:0;left:0;width:100%;height:100%;background:rgba(0,0,0,0.95);display:flex;align-items:center;justify-content:center;z-index:100;flex-direction:column;text-align:center}
+    #startScreen.hidden{display:none}
+    #startScreen h1{font-size:3em;margin-bottom:20px;color:#ffff00}
+    #startScreen .instructions{font-size:1.1em;line-height:1.8;max-width:600px;margin-bottom:40px;color:#ccc}
+    #startScreen .instructions strong{color:#fff}
+    #startScreen button{padding:15px 40px;font-size:1.2em;background:#ffff00;color:#000;border:none;border-radius:8px;cursor:pointer;font-weight:bold}
+    #startScreen button:hover{background:#ffff88}
+    
+    /* Win screen */
+    #winScreen{position:fixed;top:0;left:0;width:100%;height:100%;background:rgba(0,0,0,0.98);display:flex;align-items:center;justify-content:center;z-index:100;flex-direction:column;text-align:center;opacity:0;pointer-events:none;transition:opacity 0.5s ease-in}
+    #winScreen.show{opacity:1;pointer-events:all}
+    #winScreen h1{font-size:4em;margin-bottom:20px;color:#ffff00;text-shadow:0 0 20px #ffff00;animation:pulse 0.8s ease-in-out infinite}
+    #winScreen .stats{font-size:1.3em;line-height:2;max-width:600px;margin-bottom:40px;color:#afffaa}
+    #winScreen .stats strong{color:#fff}
+    #winScreen button{padding:15px 40px;font-size:1.2em;background:#00ff00;color:#000;border:none;border-radius:8px;cursor:pointer;font-weight:bold}
+    #winScreen button:hover{background:#77ff77}
+    
+    /* Game Over screen */
+    #gameOverScreen{position:fixed;top:0;left:0;width:100%;height:100%;background:rgba(0,0,0,0.98);display:flex;align-items:center;justify-content:center;z-index:100;flex-direction:column;text-align:center;opacity:0;pointer-events:none;transition:opacity 0.5s ease-in}
+    #gameOverScreen.show{opacity:1;pointer-events:all}
+    #gameOverScreen h1{font-size:4em;margin-bottom:20px;color:#ff3333;text-shadow:0 0 20px #ff3333;animation:shake 0.3s ease-in-out infinite}
+    #gameOverScreen .stats{font-size:1.3em;line-height:2;max-width:600px;margin-bottom:40px;color:#ffaaaa}
+    #gameOverScreen .stats strong{color:#fff}
+    #gameOverScreen button{padding:15px 40px;font-size:1.2em;background:#ff6666;color:#fff;border:none;border-radius:8px;cursor:pointer;font-weight:bold}
+    #gameOverScreen button:hover{background:#ff9999}
+    @keyframes pulse{0%{transform:scale(1)}50%{transform:scale(1.1)}100%{transform:scale(1)}}
+    @keyframes shake{0%{transform:translateX(0)}25%{transform:translateX(-10px)}50%{transform:translateX(10px)}75%{transform:translateX(-10px)}100%{transform:translateX(0)}}
+  </style>
+</head>
+<body>
+<canvas id="view"></canvas>
+<div id="ui"><div id="help">WASD to move, mouse to look (click to lock). M to toggle map. E to interact/pickup. Touch: left side to move, drag right side to look. Tap "Use" to interact.</div></div>
+<button id="mapToggle">Map (M)</button>
+<button id="pointerBtn" class="btn">Enable Pointer Lock</button>
+<div class="hud" id="hud">Floor: 0 / Items: 0</div>
+<div id="message" style="display:none"></div>
+<div id="credits">Maze generated randomly • 2 slow monsters hunt you!</div>
+<!-- Mobile controls -->
+<div class="leftSideMove" id="leftSideMove"></div>
+<div class="joystick" id="joy"><div class="stick" id="stick"></div></div>
+<div class="lookPad" id="lookPad"></div>
+<button class="actionBtn" id="actionBtn">Use</button>
+
+<!-- Start screen -->
+<div id="startScreen">
+  <h1>🌀 MAZE GAME</h1>
+  <div class="instructions">
+    <strong>Desktop:</strong><br>
+    WASD to move • Mouse to look (click to lock) • E to interact/pickup<br>
+    M to toggle map<br>
+    <br>
+    <strong>Mobile:</strong><br>
+    Tap/drag left side to move • Drag right side to look<br>
+    Tap "Use" button to interact with items/exit<br>
+    <br>
+    <strong>Goal:</strong> Collect loot and find the exit!<br>
+    <strong>Warning:</strong> Avoid the 5 monsters or face GAME OVER!
+  </div>
+  <button id="startBtn">START GAME</button>
+</div>
+
+<!-- Win screen -->
+<div id="winScreen">
+  <h1>✨ YOU WIN! ✨</h1>
+  <div class="stats">
+    <strong>Items Collected:</strong> <span id="itemCount">0</span>/5<br>
+    <strong>Escaped the monsters!</strong><br>
+    <strong>Congratulations!</strong>
+  </div>
+  <button id="restartBtn">PLAY AGAIN</button>
+</div>
+
+<!-- Game Over screen -->
+<div id="gameOverScreen">
+  <h1>💀 GAME OVER 💀</h1>
+  <div class="stats">
+    <strong>Caught by a monster!</strong><br>
+    <strong>Items Collected:</strong> <span id="finalItemCount">0</span>/5<br>
+    <strong>Better luck next time...</strong>
+  </div>
+  <button id="restartBtnGameOver">TRY AGAIN</button>
+</div>
+
+<script>
+(() => {
+  const canvas = document.getElementById('view');
+  const ctx = canvas.getContext('2d');
+  let W = canvas.width = window.innerWidth;
+  let H = canvas.height = window.innerHeight;
+
+  window.addEventListener('resize', ()=>{
+    W = canvas.width = window.innerWidth;
+    H = canvas.height = window.innerHeight;
+  });
+
+  // Start screen
+  const startScreen = document.getElementById('startScreen');
+  const startBtn = document.getElementById('startBtn');
+  const winScreen = document.getElementById('winScreen');
+  const gameOverScreen = document.getElementById('gameOverScreen');
+  const restartBtn = document.getElementById('restartBtn');
+  const restartBtnGameOver = document.getElementById('restartBtnGameOver');
+  let gameStarted = false;
+  let gameWon = false;
+  let gameOver = false;
+  
+  startBtn.addEventListener('click', ()=>{
+    gameStarted = true;
+    startScreen.classList.add('hidden');
+  });
+  
+  restartBtn.addEventListener('click', ()=>{
+    location.reload();
+  });
+  
+  restartBtnGameOver.addEventListener('click', ()=>{
+    location.reload();
+  });
+
+  // Maze parameters
+  const COLS = 31; // odd better for walls
+  const ROWS = 31;
+  const FLOORS = 1; // now single floor
+
+  // Generate single-floor maze (recursive backtracker)
+  function generateMaze(cols, rows) {
+    const grid = [];
+    for (let x=0;x<cols;x++){
+      grid[x]=[];
+      for (let y=0;y<rows;y++) grid[x][y] = {x,y,visited:false,walls:[true,true,true,true]};
+    }
+    const stack = [];
+    const start = grid[0][0];
+    start.visited = true;
+    stack.push(start);
+    const dirs = [[1,0,0],[0,1,1],[-1,0,2],[0,-1,3]]; // dx,dy,wall index
+    while(stack.length){
+      const current = stack[stack.length-1];
+      const neighbors=[];
+      for(const [dx,dy,wi] of dirs){
+        const nx=current.x+dx, ny=current.y+dy;
+        if(nx>=0&&nx<cols&&ny>=0&&ny<rows && !grid[nx][ny].visited) neighbors.push([grid[nx][ny],dx,dy,wi]);
+      }
+      if(neighbors.length){
+        const [n,dx,dy,wi] = neighbors[Math.floor(Math.random()*neighbors.length)];
+        const opos = (wi+2)%4;
+        current.walls[wi]=false;
+        n.walls[opos]=false;
+        n.visited=true;
+        stack.push(n);
+      } else stack.pop();
+    }
+    for(let x=0;x<cols;x++) for(let y=0;y<rows;y++) grid[x][y].visited=false;
+    return grid;
+  }
+
+  // generate floor
+  const mazes = [];
+  for(let f=0; f<FLOORS; f++) mazes.push(generateMaze(COLS,ROWS));
+
+  // exit at floor 0
+  function randCellAvoid(forbidden){
+    while(true){
+      const x = Math.floor(Math.random()*COLS);
+      const y = Math.floor(Math.random()*ROWS);
+      let ok=true;
+      for(const p of forbidden){ if(p && p.x===x && p.y===y) ok=false }
+      if(ok) return {x,y};
+    }
+  }
+
+  let exitPos = randCellAvoid([{x:0,y:0}]);
+
+  // loot items
+  const LOOT_COUNT = 5;
+  const loots = [];
+  function placeLoot(){
+    const used = new Set();
+    while(loots.length < LOOT_COUNT){
+      const f = 0; // single floor
+      const x = Math.floor(Math.random()*COLS);
+      const y = Math.floor(Math.random()*ROWS);
+      const key = `${f}:${x}:${y}`;
+      // avoid start, exit
+      if(x===0&&y===0&&f===0) continue;
+      if(f===0 && x===exitPos.x && y===exitPos.y) continue;
+      if(used.has(key)) continue;
+      used.add(key);
+      loots.push({floor:f,x,y,px:x+0.5,py:y+0.5,picked:false});
+    }
+  }
+  placeLoot();
+
+  // monsters - 5 of them, but slower
+  const MONSTER_COUNT = 20;
+  const monsters = [];
+  function spawnMonsters(){
+    const used = new Set();
+    while(monsters.length < MONSTER_COUNT){
+      const f = 0;
+      const x = Math.floor(Math.random()*COLS);
+      const y = Math.floor(Math.random()*ROWS);
+      const key = `${f}:${x}:${y}`;
+      // avoid start
+      if(x===0&&y===0&&f===0) continue;
+      if(used.has(key)) continue;
+      used.add(key);
+      monsters.push({
+        floor:f,
+        x:x,
+        y:y,
+        px:x+0.5,
+        py:y+0.5,
+        vx:0,
+        vy:0,
+        carryingLoot:null,
+        updateTimer:0
+      });
+    }
+  }
+  spawnMonsters();
+
+  // visitedCells for minimap fog of war per floor
+  const visited = Array.from({length:FLOORS}, ()=>Array.from({length:COLS}, ()=>Array(ROWS).fill(false)));
+
+  // Player state
+  let currentFloor = 0;
+  let px = 0.5; // in maze cell coords (0..COLS)
+  let py = 0.5;
+  let yaw = 0; // radians
+  const FOV = Math.PI/3; // 60deg
+  const NUM_RAYS = Math.min(240, Math.floor(window.innerWidth/2));
+
+  // initialize
+  px = 0.5; py = 0.5; yaw = 0; currentFloor = 0;
+  visited[currentFloor][Math.floor(px)][Math.floor(py)] = true;
+
+  // movement
+  const keys = {};
+  document.addEventListener('keydown', e=>{ keys[e.key.toLowerCase()]=true; if(e.key.toLowerCase()==='m') mapOn=!mapOn; if(e.key.toLowerCase()==='e') useAction(); });
+  document.addEventListener('keyup', e=>{ keys[e.key.toLowerCase()]=false; });
+
+  // pointer lock
+  const pointerBtn = document.getElementById('pointerBtn');
+  pointerBtn.addEventListener('click', ()=>{ canvas.requestPointerLock?.(); });
+  document.addEventListener('pointerlockchange', ()=>{
+    const locked = document.pointerLockElement === canvas;
+    pointerBtn.style.display = locked ? 'none' : '';
+  });
+  document.addEventListener('mousemove', e=>{
+    if(document.pointerLockElement === canvas){
+      yaw += e.movementX * 0.0025; // sensitivity
+    }
+  });
+
+  // touch look (right side drag)
+  const lookPad = document.getElementById('lookPad');
+  let touchLooking = false; let lastTouchX=null;
+  lookPad.addEventListener('touchstart', (e)=>{ touchLooking=true; lastTouchX=e.touches[0].clientX; });
+  lookPad.addEventListener('touchmove', (e)=>{ if(!touchLooking) return; const x=e.touches[0].clientX; const dx=x-lastTouchX; yaw += dx*0.005; lastTouchX=x; e.preventDefault(); });
+  lookPad.addEventListener('touchend', ()=>{ touchLooking=false; lastTouchX=null; });
+
+  // Left side movement (full left half of screen)
+  const leftSideMove = document.getElementById('leftSideMove');
+  let leftSideActive = false;
+  let leftSideStart = null;
+  let leftSideVec = {x:0, y:0};
+  
+  leftSideMove.addEventListener('touchstart', (e)=>{
+    if(!gameStarted) return;
+    leftSideActive = true;
+    const touch = e.touches[0];
+    leftSideStart = {x: touch.clientX, y: touch.clientY};
+    leftSideVec = {x: 0, y: 0};
+  });
+  
+  leftSideMove.addEventListener('touchmove', (e)=>{
+    if(!leftSideActive || !leftSideStart) return;
+    const touch = e.touches[0];
+    const dx = touch.clientX - leftSideStart.x;
+    const dy = touch.clientY - leftSideStart.y;
+    const maxDist = 80;
+    const dist = Math.hypot(dx, dy);
+    if(dist > 0){
+      const ratio = Math.min(1, dist / maxDist);
+      leftSideVec.x = (dx / dist) * ratio;
+      leftSideVec.y = (dy / dist) * ratio;
+    }
+    e.preventDefault();
+  });
+  
+  leftSideMove.addEventListener('touchend', ()=>{
+    leftSideActive = false;
+    leftSideStart = null;
+    leftSideVec = {x: 0, y: 0};
+  });
+
+  // joystick for movement (legacy)
+  const joy = document.getElementById('joy');
+  const stick = document.getElementById('stick');
+  let stickActive=false; let stickCenter=null; let stickVec={x:0,y:0};
+  function resetStick(){ stick.style.transform='translate(0,0)'; stickVec={x:0,y:0}; }
+  function onPointerDown(e){
+    stickActive=true;
+    const r=joy.getBoundingClientRect();
+    stickCenter={x:r.left + r.width/2, y:r.top + r.height/2};
+  }
+  function onPointerMove(e){
+    if(!stickActive) return;
+    const pt = (e.touches?e.touches[0]:e);
+    const dx=pt.clientX-stickCenter.x, dy=pt.clientY-stickCenter.y;
+    const max=40;
+    const mag = Math.hypot(dx,dy) || 1;
+    const nx = Math.max(-max, Math.min(max, dx));
+    const ny = Math.max(-max, Math.min(max, dy));
+    stick.style.transform = `translate(${nx}px, ${ny}px)`;
+    stickVec.x = nx / max;
+    stickVec.y = ny / max;
+    e.preventDefault && e.preventDefault();
+  }
+  function onPointerUp(){ stickActive=false; resetStick(); }
+  joy.addEventListener('touchstart', onPointerDown); joy.addEventListener('touchmove', onPointerMove); joy.addEventListener('touchend', onPointerUp);
+  joy.addEventListener('pointerdown', onPointerDown); window.addEventListener('pointermove', onPointerMove); window.addEventListener('pointerup', onPointerUp);
+
+  // Map toggle
+  let mapOn = false;
+  const mapToggle = document.getElementById('mapToggle');
+  mapToggle.addEventListener('click', ()=>{ mapOn=!mapOn; });
+
+  // action button (mobile)
+  const actionBtn = document.getElementById('actionBtn');
+  actionBtn.addEventListener('click', useAction);
+
+  // simple collision detection using cell walls for the current floor
+  function canMoveToOnFloor(floor, nx, ny, prevX, prevY){
+    if(nx<0.1 || ny<0.1 || nx>COLS-0.1 || ny>ROWS-0.1) return false;
+    const cx = Math.floor(prevX), cy=Math.floor(prevY);
+    const ncx = Math.floor(nx), ncy = Math.floor(ny);
+    if(ncx!==cx || ncy!==cy){
+      const cell = mazes[floor][cx][cy];
+      const dx = ncx - cx, dy = ncy - cy;
+      if(dx===1 && cell.walls[0]) return false;
+      if(dx===-1 && cell.walls[2]) return false;
+      if(dy===1 && cell.walls[1]) return false;
+      if(dy===-1 && cell.walls[3]) return false;
+    }
+    return true;
+  }
+
+  // Check if there's line of sight between two points (no walls blocking)
+  function hasLineOfSight(x1, y1, x2, y2){
+    const dx = x2 - x1;
+    const dy = y2 - y1;
+    const dist = Math.hypot(dx, dy);
+    if(dist < 0.01) return true;
+    
+    const steps = Math.ceil(dist * 20);
+    for(let i = 0; i <= steps; i++){
+      const t = i / steps;
+      const checkX = x1 + dx * t;
+      const checkY = y1 + dy * t;
+      const cx = Math.floor(checkX);
+      const cy = Math.floor(checkY);
+      
+      if(cx < 0 || cy < 0 || cx >= COLS || cy >= ROWS) return false;
+      
+      // Check wall transitions
+      if(i > 0){
+        const prevX = x1 + dx * ((i-1) / steps);
+        const prevY = y1 + dy * ((i-1) / steps);
+        const pcx = Math.floor(prevX);
+        const pcy = Math.floor(prevY);
+        
+        if(pcx !== cx || pcy !== cy){
+          const cell = mazes[currentFloor][pcx][pcy];
+          const wallDx = cx - pcx;
+          const wallDy = cy - pcy;
+          
+          if(wallDx===1 && cell.walls[0]) return false;
+          if(wallDx===-1 && cell.walls[2]) return false;
+          if(wallDy===1 && cell.walls[1]) return false;
+          if(wallDy===-1 && cell.walls[3]) return false;
+        }
+      }
+    }
+    return true;
+  }
+
+  // Monster AI - slower and respects walls/line of sight
+  function updateMonsters(dt){
+    for(const m of monsters){
+      if(m.floor !== currentFloor) continue;
+      
+      m.updateTimer++;
+      
+      // Every 40 updates (slower updates), recalculate pathfinding
+      if(m.updateTimer >= 40){
+        m.updateTimer = 0;
+        
+        // Simple chase: move toward player if within view range AND in line of sight
+        const dx = px - m.px;
+        const dy = py - m.py;
+        const dist = Math.hypot(dx, dy);
+        
+        if(dist < 8 && hasLineOfSight(m.px, m.py, px, py)){
+          // Chase player (slow speed: 0.3 instead of 0.8)
+          const angle = Math.atan2(dy, dx);
+          m.vx = Math.cos(angle) * 0.3;
+          m.vy = Math.sin(angle) * 0.3;
+        } else {
+          // Idle
+          m.vx = 0;
+          m.vy = 0;
+        }
+      }
+      
+      // Apply velocity with collision
+      let nx = m.px + m.vx * dt;
+      let ny = m.py + m.vy * dt;
+      
+      if(canMoveToOnFloor(currentFloor, nx, ny, m.px, m.py)){
+        m.px = nx;
+        m.py = ny;
+      }
+      
+      m.x = Math.floor(m.px);
+      m.y = Math.floor(m.py);
+      
+      // Check if monster catches player - GAME OVER
+      const playerDist = Math.hypot(m.px - px, m.py - py);
+      if(playerDist < 0.3){
+        triggerGameOver();
+      }
+    }
+  }
+
+  // Check if target is visible (respects walls)
+  function isVisible(targetX, targetY){
+    return hasLineOfSight(px, py, targetX, targetY);
+  }
+
+  // Render monster in 3D view (only if visible)
+  function renderMonster(m){
+    const dx = m.px - px;
+    const dy = m.py - py;
+    const dist = Math.hypot(dx, dy);
+    
+    if(dist < 0.1) return; // behind player
+    
+    // Check line of sight before rendering
+    if(!isVisible(m.px, m.py)) return;
+    
+    const angle = Math.atan2(dy, dx) - yaw;
+    let normalizedAngle = angle;
+    while(normalizedAngle > Math.PI) normalizedAngle -= Math.PI*2;
+    while(normalizedAngle < -Math.PI) normalizedAngle += Math.PI*2;
+    
+    // Check if in FOV
+    if(Math.abs(normalizedAngle) > FOV/2) return;
+    
+    // Project to screen
+    const cameraX = normalizedAngle / (FOV/2);
+    const screenX = (cameraX + 1) * (W/2);
+    
+    // Correct distance and scale
+    const corrected = dist * Math.cos(angle);
+    if(corrected < 0.1) return;
+    
+    const monsterHeight = (H * 0.7) / corrected;
+    const screenY = H/2 - monsterHeight/2;
+    const monsterWidth = monsterHeight * 0.6;
+    
+    // Draw monster (red rectangle with ax)
+    ctx.fillStyle = 'rgba(220,50,50,0.9)';
+    ctx.fillRect(screenX - monsterWidth/2, screenY, monsterWidth, monsterHeight);
+    
+    // Draw head
+    ctx.fillStyle = 'rgba(255,100,100,0.9)';
+    const headSize = monsterHeight * 0.25;
+    ctx.fillRect(screenX - monsterWidth*0.35, screenY, monsterWidth*0.7, headSize);
+    
+    // Draw eyes
+    ctx.fillStyle = '#000';
+    ctx.fillRect(screenX - monsterWidth*0.2, screenY + headSize*0.3, monsterWidth*0.12, headSize*0.15);
+    ctx.fillRect(screenX + monsterWidth*0.08, screenY + headSize*0.3, monsterWidth*0.12, headSize*0.15);
+    
+    // Draw ax (red and brown)
+    ctx.fillStyle = '#8B4513';
+    ctx.fillRect(screenX + monsterWidth*0.3, screenY - headSize*0.2, monsterWidth*0.15, headSize*0.8);
+    ctx.fillStyle = '#FF4444';
+    ctx.beginPath();
+    ctx.moveTo(screenX + monsterWidth*0.35, screenY - headSize*0.1);
+    ctx.lineTo(screenX + monsterWidth*0.55, screenY - headSize*0.2);
+    ctx.lineTo(screenX + monsterWidth*0.5, screenY + headSize*0.1);
+    ctx.closePath();
+    ctx.fill();
+  }
+
+  // Render exit in 3D view
+  function renderExit(){
+    const dx = exitPos.x + 0.5 - px;
+    const dy = exitPos.y + 0.5 - py;
+    const dist = Math.hypot(dx, dy);
+    
+    if(dist < 0.1) return; // behind player
+    
+    const angle = Math.atan2(dy, dx) - yaw;
+    let normalizedAngle = angle;
+    while(normalizedAngle > Math.PI) normalizedAngle -= Math.PI*2;
+    while(normalizedAngle < -Math.PI) normalizedAngle += Math.PI*2;
+    
+    // Check if in FOV
+    if(Math.abs(normalizedAngle) > FOV/2) return;
+    
+    // Project to screen
+    const cameraX = normalizedAngle / (FOV/2);
+    const screenX = (cameraX + 1) * (W/2);
+    
+    // Correct distance and scale
+    const corrected = dist * Math.cos(angle);
+    if(corrected < 0.1) return;
+    
+    const exitHeight = (H * 0.8) / corrected;
+    const screenY = H/2 - exitHeight/2;
+    const exitWidth = exitHeight * 0.6;
+    
+    // Draw glowing magenta portal
+    ctx.fillStyle = 'rgba(255,0,255,0.3)';
+    ctx.fillRect(screenX - exitWidth/2, screenY, exitWidth, exitHeight);
+    
+    // Draw brighter inner portal
+    ctx.fillStyle = 'rgba(255,100,255,0.6)';
+    ctx.fillRect(screenX - exitWidth*0.4, screenY + exitHeight*0.2, exitWidth*0.8, exitHeight*0.6);
+    
+    // Draw bright center with pulsing glow
+    const pulse = Math.sin(Date.now() * 0.005) * 0.3 + 0.7;
+    ctx.fillStyle = `rgba(255,200,255,${pulse})`;
+    ctx.beginPath();
+    ctx.arc(screenX, screenY + exitHeight/2, exitWidth*0.2, 0, Math.PI*2);
+    ctx.fill();
+    
+    // Draw outline
+    ctx.strokeStyle = 'rgba(255,0,255,0.8)';
+    ctx.lineWidth = 3;
+    ctx.strokeRect(screenX - exitWidth/2, screenY, exitWidth, exitHeight);
+  }
+
+  // Raycasting renderer for current floor
+  function render() {
+    if(!gameStarted || gameWon || gameOver) return;
+    if(mapOn){
+      drawMapFullScreen();
+      return;
+    }
+
+    ctx.fillStyle='#111'; ctx.fillRect(0,0,W,H);
+    const halfH = H/2;
+    const stripWidth = W/NUM_RAYS;
+    for(let r=0;r<NUM_RAYS;r++){
+      const cameraX = (2*r/NUM_RAYS - 1); // -1..1
+      const rayAngle = yaw + Math.atan(cameraX * Math.tan(FOV/2));
+      let distance = 0;
+      let hit=false;
+      const sin = Math.sin(rayAngle), cos = Math.cos(rayAngle);
+      const maxDepth = Math.max(COLS,ROWS)*1.5;
+      let rx=px, ry=py;
+      const delta = 0.02; // step size
+      while(!hit && distance < maxDepth){
+        rx += cos*delta; ry += sin*delta; distance += delta;
+        const cx = Math.floor(rx), cy = Math.floor(ry);
+        if(cx<0||cy<0||cx>=COLS||cy>=ROWS){ hit=true; break; }
+        const pcx = Math.floor(rx - cos*delta), pcy = Math.floor(ry - sin*delta);
+        if(pcx!==cx || pcy!==cy){
+          const cell = mazes[currentFloor][pcx][pcy];
+          const dx = cx-pcx, dy = cy-pcy;
+          if(dx===1 && cell.walls[0]){ hit=true; break; }
+          if(dx===-1 && cell.walls[2]){ hit=true; break; }
+          if(dy===1 && cell.walls[1]){ hit=true; break; }
+          if(dy===-1 && cell.walls[3]){ hit=true; break; }
+        }
+      }
+      const corrected = Math.max(0.0001, distance * Math.cos(rayAngle - yaw));
+      const wallHeight = Math.min(H*2, (H*0.9) / corrected);
+      const x = Math.floor(r * stripWidth);
+      const shade = Math.max(0, 1 - corrected/Math.max(COLS,ROWS));
+      const colorVal = Math.floor(40 + 200*shade);
+      ctx.fillStyle = `rgb(${colorVal},${colorVal},${colorVal})`;
+      ctx.fillRect(x, halfH - wallHeight/2, Math.ceil(stripWidth)+1, wallHeight);
+      ctx.fillStyle = `rgba(10,10,20,${0.6 - Math.min(0.5, corrected/Math.max(COLS,ROWS))})`;
+      ctx.fillRect(x, 0, Math.ceil(stripWidth)+1, halfH - wallHeight/2);
+      ctx.fillStyle = `rgba(30,20,10,${0.6 - Math.min(0.5, corrected/Math.max(COLS,ROWS))})`;
+      ctx.fillRect(x, halfH + wallHeight/2, Math.ceil(stripWidth)+1, halfH - wallHeight/2);
+    }
+
+    // Render loot in 3D (only if visible and not picked up)
+    for(const l of loots){
+      if(l.floor !== currentFloor || l.picked) continue;
+      
+      // Check line of sight
+      if(!isVisible(l.px, l.py)) continue;
+      
+      const dx = l.px - px;
+      const dy = l.py - py;
+      const dist = Math.hypot(dx, dy);
+      
+      if(dist < 0.1) continue; // behind player
+      
+      const angle = Math.atan2(dy, dx) - yaw;
+      let normalizedAngle = angle;
+      while(normalizedAngle > Math.PI) normalizedAngle -= Math.PI*2;
+      while(normalizedAngle < -Math.PI) normalizedAngle += Math.PI*2;
+      
+      if(Math.abs(normalizedAngle) > FOV/2) continue;
+      
+      const cameraX = normalizedAngle / (FOV/2);
+      const screenX = (cameraX + 1) * (W/2);
+      
+      const corrected = dist * Math.cos(angle);
+      if(corrected < 0.1) continue;
+      
+      const lootSize = (H * 0.1) / corrected;
+      const screenY = H/2 - lootSize/2;
+      
+      ctx.fillStyle = 'gold';
+      ctx.beginPath();
+      ctx.arc(screenX, screenY, lootSize/2, 0, Math.PI*2);
+      ctx.fill();
+      
+      ctx.strokeStyle = '#FFD700';
+      ctx.lineWidth = 2;
+      ctx.stroke();
+    }
+
+    // Render exit
+    renderExit();
+
+    // Render monsters
+    for(const m of monsters){
+      if(m.floor === currentFloor){
+        renderMonster(m);
+      }
+    }
+
+    // HUD: crosshair
+    ctx.fillStyle='rgba(255,255,255,0.8)';
+    ctx.fillRect(W/2-1,H/2-10,2,20);
+    ctx.fillRect(W/2-10,H/2-1,20,2);
+  }
+
+  function drawMapFullScreen(){
+    // draw an overhead map that fills the canvas while preserving aspect
+    ctx.fillStyle = '#000'; ctx.fillRect(0,0,W,H);
+    const padding = 20;
+    const mapWidth = W - padding*2;
+    const mapHeight = H - padding*2;
+    const cellSize = Math.min(mapWidth / COLS, mapHeight / ROWS);
+    const totalW = cellSize * COLS;
+    const totalH = cellSize * ROWS;
+    const ox = (W - totalW)/2;
+    const oy = (H - totalH)/2;
+
+    ctx.save();
+    // background
+    ctx.fillStyle = 'rgba(10,10,10,1)';
+    ctx.fillRect(ox-4, oy-4, totalW+8, totalH+8);
+
+    // cells
+    for(let x=0;x<COLS;x++){
+      for(let y=0;y<ROWS;y++){
+        const seen = visited[currentFloor][x][y] || false;
+        ctx.fillStyle = seen ? '#88bb88' : '#0b0b0b';
+        ctx.fillRect(ox + x*cellSize, oy + y*cellSize, cellSize, cellSize);
+      }
+    }
+
+    // draw walls only if they border a visited cell (fog-of-war)
+    ctx.strokeStyle='#ffffff'; ctx.lineWidth = Math.max(1, Math.floor(cellSize*0.06));
+    for(let x=0;x<COLS;x++){
+      for(let y=0;y<ROWS;y++){
+        const c = mazes[currentFloor][x][y];
+        const seenA = visited[currentFloor][x][y];
+        // neighbors
+        const seenUp = (y-1>=0) ? visited[currentFloor][x][y-1] : false;
+        const seenRight = (x+1<COLS) ? visited[currentFloor][x+1][y] : false;
+        const seenDown = (y+1<ROWS) ? visited[currentFloor][x][y+1] : false;
+        const seenLeft = (x-1>=0) ? visited[currentFloor][x-1][y] : false;
+        // A wall segment is visible if either side cell has been visited
+        const showTop = c.walls[3] && (seenA || seenUp);
+        const showRight = c.walls[0] && (seenA || seenRight);
+        const showBottom = c.walls[1] && (seenA || seenDown);
+        const showLeft = c.walls[2] && (seenA || seenLeft);
+        const x0 = ox + x*cellSize, y0 = oy + y*cellSize;
+        if(showTop){ ctx.beginPath(); ctx.moveTo(x0, y0); ctx.lineTo(x0 + cellSize, y0); ctx.stroke(); }
+        if(showRight){ ctx.beginPath(); ctx.moveTo(x0 + cellSize, y0); ctx.lineTo(x0 + cellSize, y0 + cellSize); ctx.stroke(); }
+        if(showBottom){ ctx.beginPath(); ctx.moveTo(x0, y0 + cellSize); ctx.lineTo(x0 + cellSize, y0 + cellSize); ctx.stroke(); }
+        if(showLeft){ ctx.beginPath(); ctx.moveTo(x0, y0); ctx.lineTo(x0, y0 + cellSize); ctx.stroke(); }
+      }
+    }
+
+    // draw loots
+    for(const l of loots){
+      if(l.floor !== currentFloor) continue;
+      const seen = visited[l.floor][l.x][l.y] || l.picked;
+      if(!seen) continue;
+      ctx.fillStyle = l.picked ? 'rgba(200,200,0,0.9)' : 'yellow';
+      ctx.beginPath(); ctx.arc(ox + (l.px)*cellSize, oy + (l.py)*cellSize, Math.max(4,cellSize*0.12),0,Math.PI*2); ctx.fill();
+    }
+
+    // draw monsters
+    for(const m of monsters){
+      if(m.floor !== currentFloor) continue;
+      ctx.fillStyle='#FF3333';
+      ctx.beginPath();
+      ctx.rect(ox + m.px*cellSize - cellSize*0.15, oy + m.py*cellSize - cellSize*0.15, cellSize*0.3, cellSize*0.3);
+      ctx.fill();
+    }
+
+    // draw exit (always visible)
+    //ctx.fillStyle='magenta';
+    //ctx.beginPath();
+    //ctx.rect(ox + exitPos.x*cellSize + cellSize*0.1, oy + exitPos.y*cellSize + cellSize*0.1, cellSize*0.8, cellSize*0.8);
+    //ctx.fill();
+
+    // player on map
+    ctx.fillStyle='red';
+    ctx.beginPath();
+    ctx.arc(ox + px*cellSize, oy + py*cellSize, Math.max(6, cellSize/4), 0, Math.PI*2);
+    ctx.fill();
+    // direction line
+    ctx.strokeStyle='red'; ctx.beginPath(); ctx.moveTo(ox+px*cellSize, oy+py*cellSize);
+    ctx.lineTo(ox + (px + Math.cos(yaw)*0.6)*cellSize, oy + (py + Math.sin(yaw)*0.6)*cellSize); ctx.stroke();
+
+    // HUD text
+    ctx.fillStyle='white'; ctx.font = Math.max(12, Math.floor(cellSize*0.5)) + 'px monospace';
+    ctx.fillText('Floor: ' + currentFloor, ox + 6, oy - 10);
+    ctx.restore();
+  }
+
+  // HUD update
+  const hud = document.getElementById('hud');
+  function updateHUD(){
+    const items = loots.filter(l=>l.picked).length;
+    hud.textContent = `Floor: ${currentFloor} • Items: ${items}/${LOOT_COUNT}`;
+  }
+
+  // check for pickups and interactions
+  function tryPickup(){
+    const cx = Math.floor(px), cy = Math.floor(py);
+    for(const l of loots){
+      if(!l.picked && !l.hasOwner && l.floor===currentFloor && Math.floor(l.px)===cx && Math.floor(l.py)===cy){ 
+        l.picked = true; 
+        updateHUD(); 
+      }
+    }
+  }
+
+  function useAction(){
+    const cx = Math.floor(px), cy = Math.floor(py);
+    // pickup
+    const prevPicked = loots.filter(l=>l.picked).length;
+    tryPickup();
+    const picked = loots.filter(l=>l.picked).length;
+    if(picked>prevPicked) return;
+    // check exit
+    if(currentFloor===0 && cx===exitPos.x && cy===exitPos.y){
+      triggerWin();
+    }
+  }
+
+  function triggerWin(){
+    gameWon = true;
+    const items = loots.filter(l=>l.picked).length;
+    document.getElementById('itemCount').textContent = items;
+    winScreen.classList.add('show');
+  }
+
+  function triggerGameOver(){
+    gameOver = true;
+    const items = loots.filter(l=>l.picked).length;
+    document.getElementById('finalItemCount').textContent = items;
+    gameOverScreen.classList.add('show');
+  }
+
+  // update loop
+  let last = performance.now();
+  function update(now){
+    const dt = Math.min(0.05, (now-last)/1000); last=now;
+    
+    // Only update if game has started
+    if(!gameStarted || gameWon || gameOver){
+      requestAnimationFrame(update);
+      return;
+    }
+
+    // Update monsters
+    updateMonsters(dt);
+
+    // If map is open, disable movement
+    if(!mapOn){
+      // movement vector
+      let mvx=0,mvy=0;
+      const speed = 2.8; // cells per second
+      // keyboard
+      if(keys['w']){ mvx += Math.cos(yaw); mvy += Math.sin(yaw); }
+      if(keys['s']){ mvx -= Math.cos(yaw); mvy -= Math.sin(yaw); }
+      if(keys['a']){ mvx += Math.cos(yaw - Math.PI/2); mvy += Math.sin(yaw - Math.PI/2); }
+      if(keys['d']){ mvx += Math.cos(yaw + Math.PI/2); mvy += Math.sin(yaw + Math.PI/2); }
+      // joystick (legacy)
+      if(stickVec.x || stickVec.y){
+        const jforward = -stickVec.y; const jstrafe = stickVec.x;
+        mvx += jforward*Math.cos(yaw) + jstrafe*Math.cos(yaw + Math.PI/2);
+        mvy += jforward*Math.sin(yaw) + jstrafe*Math.sin(yaw + Math.PI/2);
+      }
+      // left side movement
+      if(leftSideVec.x || leftSideVec.y){
+        const lforward = -leftSideVec.y; const lstrafe = leftSideVec.x;
+        mvx += lforward*Math.cos(yaw) + lstrafe*Math.cos(yaw + Math.PI/2);
+        mvy += lforward*Math.sin(yaw) + lstrafe*Math.sin(yaw + Math.PI/2);
+      }
+      // normalize
+      const len = Math.hypot(mvx,mvy);
+      if(len>0.001){ mvx = (mvx/len) * speed * dt; mvy = (mvy/len) * speed * dt; }
+      let nx = px + mvx, ny = py + mvy;
+      if(canMoveToOnFloor(currentFloor, nx, ny, px, py)){ px = nx; py = ny; }
+      // mark visited
+      const cx = Math.floor(px), cy = Math.floor(py);
+      if(cx>=0 && cy>=0 && cx<COLS && cy<ROWS) visited[currentFloor][cx][cy] = true;
+
+      // auto pickup when moving into cell
+      tryPickup();
+      
+      // Check for exit collision
+      if(cx===exitPos.x && cy===exitPos.y){
+        triggerWin();
+      }
+    }
+
+    render();
+    updateHUD();
+    requestAnimationFrame(update);
+  }
+  requestAnimationFrame(update);
+
+  // small helper: center pointer lock on canvas click for desktop
+  canvas.addEventListener('click', ()=>{ if(!document.pointerLockElement && gameStarted) canvas.requestPointerLock?.(); });
+
+  // prevent scrolling on touch for lookPad, joystick, and leftSideMove
+  document.getElementById('lookPad').addEventListener('touchstart', e=>e.preventDefault(), {passive:false});
+  document.getElementById('joy').addEventListener('touchstart', e=>e.preventDefault(), {passive:false});
+  document.getElementById('leftSideMove').addEventListener('touchstart', e=>e.preventDefault(), {passive:false});
+
+  // show initial HUD
+  updateHUD();
+
+})();
+</script>
+</body>
+</html>
