@@ -62,17 +62,23 @@
             color: #cccccc;
             margin-top: 10px;
         }
+        .status {
+            font-size: 14px;
+            color: #ffffff;
+            margin-bottom: 10px;
+        }
     </style>
 </head>
 <body>
     <div id="gameContainer">
         <h1>TEXT ADVENTURE GAME</h1>
+        <div class="status" id="status"></div>
         <div id="output"></div>
         <div class="inventory" id="inventory"></div>
         <input type="text" id="commandInput" placeholder="Enter command...">
         <button onclick="submitCommand()">Execute</button>
         <div class="help-text">
-            Commands: GO (direction), TAKE (item), DROP (item), INSPECT (target), INVENTORY, LOOK, HELP, QUIT
+            Commands: GO (direction), TAKE (item), DROP (item), INSPECT (target), INVENTORY, LOOK, HELP, QUIT, EQUIP, UNEQUIP, ATTACK, TRADE
         </div>
     </div>
 
@@ -81,23 +87,37 @@
         let gameState = {
             currentRoom: 0,
             inventory: [],
+            equipped: { weapon: null, tool: null },
             visited: new Set(),
             world: [],
-            gameOver: false
+            gameOver: false,
+            player: { hp: 100, maxHp: 100, baseDamage: 2 }
         };
 
         // World Generation
         const roomTypes = ['forest', 'cave', 'ruins', 'clearing', 'stream', 'mountain', 'temple'];
         const items = [
-            { name: 'torch', value: 10, description: 'a flickering torch' },
-            { name: 'key', value: 25, description: 'an ancient key' },
-            { name: 'coin', value: 5, description: 'a golden coin' },
-            { name: 'scroll', value: 15, description: 'a dusty scroll' },
-            { name: 'rope', value: 12, description: 'a coil of rope' },
-            { name: 'gem', value: 50, description: 'a sparkling gem' },
-            { name: 'potion', value: 20, description: 'a mysterious potion' },
-            { name: 'shield', value: 30, description: 'a dented shield' }
+            { name: 'torch', type: 'tool', value: 10, description: 'a flickering torch', equipSlot: 'tool' },
+            { name: 'key', type: 'misc', value: 25, description: 'an ancient key' },
+            { name: 'coin', type: 'currency', value: 1, description: 'a shiny coin' },
+            { name: 'scroll', type: 'misc', value: 15, description: 'a dusty scroll' },
+            { name: 'rope', type: 'tool', value: 12, description: 'a coil of rope', equipSlot: 'tool' },
+            { name: 'gem', type: 'misc', value: 50, description: 'a sparkling gem' },
+            { name: 'potion', type: 'consumable', value: 20, description: 'a mysterious potion' },
+            { name: 'shield', type: 'armor', value: 30, description: 'a dented shield' },
+            // Weapons
+            { name: 'sword', type: 'weapon', value: 40, description: 'a sharp sword', damage: 10, equipSlot: 'weapon' },
+            { name: 'dagger', type: 'weapon', value: 20, description: 'a small dagger', damage: 6, equipSlot: 'weapon' },
+            { name: 'bow', type: 'weapon', value: 35, description: 'a longbow', damage: 8, equipSlot: 'weapon' }
         ];
+
+        const enemyTypes = [
+            { name: 'Goblin', hp: 20, damage: 4, lootChance: 0.6 },
+            { name: 'Wolf', hp: 25, damage: 5, lootChance: 0.5 },
+            { name: 'Bandit', hp: 30, damage: 6, lootChance: 0.7 }
+        ];
+
+        const merchantNames = ['Old Trader', 'Wandering Merchant', 'Peddler'];
 
         const directions = ['north', 'south', 'east', 'west'];
 
@@ -113,18 +133,52 @@
 
             directions.forEach(dir => {
                 if (Math.random() > 0.3) {
-                    // Fixed: Generate room IDs that actually exist (0-9)
                     exits[dir] = Math.floor(Math.random() * 10);
                 }
             });
+
+            // Maybe merchant
+            const merchant = Math.random() > 0.9 ? generateMerchant() : null;
+            // Maybe enemy
+            const enemies = Math.random() > 0.75 ? [generateEnemy()] : [];
 
             return {
                 id: id,
                 type: type,
                 item: item,
                 exits: exits,
-                description: getDescription(type)
+                description: getDescription(type),
+                merchant: merchant,
+                enemies: enemies
             };
+        }
+
+        function generateMerchant() {
+            // Merchant has a small inventory and some coins
+            const inv = [];
+            const possible = items.filter(i => i.type !== 'currency');
+            for (let i = 0; i < 3; i++) {
+                inv.push({ ...getRandomItem(possible) });
+            }
+            // Merchant prices are based on item value
+            const merchant = {
+                name: getRandomItem(merchantNames),
+                inventory: inv,
+                coins: 100
+            };
+            return merchant;
+        }
+
+        function generateEnemy() {
+            const base = getRandomItem(enemyTypes);
+            const enemy = {
+                name: base.name,
+                hp: base.hp,
+                maxHp: base.hp,
+                damage: base.damage,
+                lootChance: base.lootChance
+            };
+            return enemy;
         }
 
         function getDescription(type) {
@@ -162,12 +216,27 @@
 
         function updateInventoryDisplay() {
             const invDiv = document.getElementById('inventory');
+            const eq = gameState.equipped;
+            const weapon = eq.weapon ? eq.weapon.name : '(none)';
+            const tool = eq.tool ? eq.tool.name : '(none)';
+
             if (gameState.inventory.length === 0) {
                 invDiv.innerHTML = '<strong>Inventory:</strong> (empty)';
             } else {
-                const items = gameState.inventory.map(item => item.name).join(', ');
-                invDiv.innerHTML = '<strong>Inventory:</strong> ' + items;
+                const itemsList = gameState.inventory.map(item => item.name + (item.type === 'currency' ? ' (x'+countCurrency(item.name)+')' : '')).join(', ');
+                invDiv.innerHTML = '<strong>Inventory:</strong> ' + itemsList + '<br><strong>Equipped:</strong> Weapon: ' + weapon + ' | Tool: ' + tool;
             }
+            updateStatus();
+        }
+
+        function countCurrency(name) {
+            // counts coins stack - each coin is separate item, so count occurrences
+            return gameState.inventory.filter(i => i.name === name).length;
+        }
+
+        function updateStatus() {
+            const status = document.getElementById('status');
+            status.textContent = 'HP: ' + gameState.player.hp + '/' + gameState.player.maxHp + '  |  Location: ' + gameState.world[gameState.currentRoom].type + '  |  Equipped: ' + (gameState.equipped.weapon ? gameState.equipped.weapon.name : 'none');
         }
 
         // Game Commands
@@ -201,6 +270,19 @@
                 case 'quit':
                     cmdQuit();
                     break;
+                case 'equip':
+                    cmdEquip(arg);
+                    break;
+                case 'unequip':
+                    cmdUnequip(arg);
+                    break;
+                case 'attack':
+                case 'fight':
+                    cmdAttack(arg);
+                    break;
+                case 'trade':
+                    cmdTrade(arg);
+                    break;
                 default:
                     appendOutput('Unknown command: "' + command + '". Type HELP for available commands.');
             }
@@ -217,10 +299,20 @@
             }
 
             if (room.item) {
-                text += 'You see ' + room.item.description + ' here.\n';
+                text += 'You see ' + room.item.description + ' here. (' + room.item.name + ')\n';
+            }
+
+            if (room.merchant) {
+                text += 'A merchant is here: ' + room.merchant.name + '. You can TRADE.\n';
+            }
+
+            if (room.enemies && room.enemies.length > 0) {
+                const names = room.enemies.map(e => e.name + ' (HP:' + e.hp + ')');
+                text += 'Enemies here: ' + names.join(', ') + '\n';
             }
 
             appendOutput(text);
+            updateInventoryDisplay();
         }
 
         function cmdGo(direction) {
@@ -238,11 +330,23 @@
             gameState.currentRoom = room.exits[direction];
             gameState.visited.add(gameState.currentRoom);
             appendOutput('You travel ' + direction + '...\n');
+
+            // When entering a new room, chance to spawn enemy or merchant
+            const newRoom = gameState.world[gameState.currentRoom];
+            if (!newRoom.merchant && Math.random() > 0.92) {
+                newRoom.merchant = generateMerchant();
+                appendOutput('You notice a merchant has arrived.\n');
+            }
+            if ((newRoom.enemies || []).length === 0 && Math.random() > 0.8) {
+                newRoom.enemies.push(generateEnemy());
+                appendOutput('You sense danger nearby...\n');
+            }
+
             cmdLook();
         }
 
-        function cmdTake(item) {
-            if (!item) {
+        function cmdTake(itemName) {
+            if (!itemName) {
                 const room = gameState.world[gameState.currentRoom];
                 if (room.item) {
                     appendOutput('You can take: ' + room.item.name);
@@ -253,9 +357,14 @@
             }
 
             const room = gameState.world[gameState.currentRoom];
-            if (!room.item || room.item.name !== item) {
-                appendOutput('You don\'t see "' + item + '" here.');
+            if (!room.item || room.item.name !== itemName) {
+                appendOutput('You don\'t see "' + itemName + '" here.');
                 return;
+            }
+
+            // If coin, stack multiple
+            if (room.item.type === 'currency') {
+                // pick up all coins in room (for simplicity, single coin is used)
             }
 
             gameState.inventory.push(room.item);
@@ -264,26 +373,28 @@
             updateInventoryDisplay();
         }
 
-        function cmdDrop(item) {
-            if (!item) {
+        function cmdDrop(itemName) {
+            if (!itemName) {
                 if (gameState.inventory.length === 0) {
                     appendOutput('You don\'t have anything to drop.');
                 } else {
-                    const items = gameState.inventory.map(i => i.name).join(', ');
-                    appendOutput('You can drop: ' + items);
+                    const itemsList = gameState.inventory.map(i => i.name).join(', ');
+                    appendOutput('You can drop: ' + itemsList);
                 }
                 return;
             }
 
-            const index = gameState.inventory.findIndex(i => i.name === item);
+            const index = gameState.inventory.findIndex(i => i.name === itemName);
             if (index === -1) {
-                appendOutput('You don\'t have "' + item + '" in your inventory.');
+                appendOutput('You don\'t have "' + itemName + '" in your inventory.');
                 return;
             }
 
             const droppedItem = gameState.inventory.splice(index, 1)[0];
             const room = gameState.world[gameState.currentRoom];
-            room.item = droppedItem;
+            // If room already has item, drop places on ground as extra (convert to room.items array)
+            if (!room.ground) room.ground = [];
+            room.ground.push(droppedItem);
             appendOutput('You dropped ' + droppedItem.description + '.');
             updateInventoryDisplay();
         }
@@ -292,17 +403,19 @@
             if (!target) {
                 const room = gameState.world[gameState.currentRoom];
                 const inspectable = [];
-                
+
                 // Add inventory items
                 gameState.inventory.forEach(item => {
                     inspectable.push(item.name);
                 });
-                
+
                 // Add room item
                 if (room.item) {
                     inspectable.push(room.item.name);
                 }
-                
+
+                if (room.ground) room.ground.forEach(i => inspectable.push(i.name));
+
                 if (inspectable.length === 0) {
                     appendOutput('There is nothing to inspect here.');
                 } else {
@@ -316,14 +429,28 @@
             // Check inventory
             const invItem = gameState.inventory.find(i => i.name === target);
             if (invItem) {
-                appendOutput('You examine ' + invItem.description + '. It looks valuable. (Worth ' + invItem.value + ' points)');
+                let extra = '';
+                if (invItem.type === 'weapon') extra = ' Damage: ' + invItem.damage + '.';
+                appendOutput('You examine ' + invItem.description + '.' + extra + ' (Worth ' + invItem.value + ' points)');
                 return;
             }
 
             // Check room item
             if (room.item && room.item.name === target) {
-                appendOutput('You examine ' + room.item.description + '. It looks valuable. (Worth ' + room.item.value + ' points)');
+                const r = room.item;
+                let extra = '';
+                if (r.type === 'weapon') extra = ' Damage: ' + r.damage + '.';
+                appendOutput('You examine ' + r.description + '.' + extra + ' (Worth ' + r.value + ' points)');
                 return;
+            }
+
+            // Check ground
+            if (room.ground) {
+                const groundItem = room.ground.find(i => i.name === target);
+                if (groundItem) {
+                    appendOutput('You examine ' + groundItem.description + '.');
+                    return;
+                }
             }
 
             // Check surroundings
@@ -343,10 +470,15 @@
 
             let text = '\n=== YOUR INVENTORY ===\n';
             let totalValue = 0;
+            const counts = {};
             gameState.inventory.forEach(item => {
-                text += '- ' + item.name + ' (worth ' + item.value + ' points)\n';
-                totalValue += item.value;
+                counts[item.name] = (counts[item.name] || 0) + 1;
+                totalValue += item.value || 0;
             });
+            for (let name in counts) {
+                const item = gameState.inventory.find(i => i.name === name);
+                text += '- ' + name + ' x' + counts[name] + (item.type === 'weapon' ? ' (weapon, dmg ' + item.damage + ')' : '') + '\n';
+            }
             text += '\nTotal value: ' + totalValue + ' points';
             appendOutput(text);
         }
@@ -360,6 +492,10 @@ TAKE [item]    - Pick up an item
 DROP [item]    - Drop an item from your inventory
 INSPECT [item] - Examine an item closely
 INVENTORY      - Check what you're carrying
+EQUIP [item]   - Equip a weapon or tool
+UNEQUIP [slot] - Unequip weapon or tool
+ATTACK [enemy] - Attack an enemy in the room
+TRADE [buy/sell item] - Trade with a merchant if present
 HELP           - Show this message
 QUIT           - End the game
 `;
@@ -370,6 +506,190 @@ QUIT           - End the game
             gameState.gameOver = true;
             appendOutput('\nThanks for playing!');
             document.getElementById('commandInput').disabled = true;
+        }
+
+        // EQUIP/UNEQUIP
+        function cmdEquip(itemName) {
+            if (!itemName) {
+                appendOutput('Equip what? Specify an item in your inventory (weapon or tool).');
+                return;
+            }
+            const idx = gameState.inventory.findIndex(i => i.name === itemName);
+            if (idx === -1) {
+                appendOutput('You don\'t have "' + itemName + '".');
+                return;
+            }
+            const item = gameState.inventory[idx];
+            if (!item.equipSlot) {
+                appendOutput('You cannot equip "' + itemName + '".');
+                return;
+            }
+
+            const slot = item.equipSlot;
+            // Unequip existing item in that slot
+            if (gameState.equipped[slot]) {
+                gameState.inventory.push(gameState.equipped[slot]);
+                appendOutput('You unequipped ' + gameState.equipped[slot].name + '.');
+            }
+
+            // Remove from inventory
+            gameState.inventory.splice(idx, 1);
+            gameState.equipped[slot] = item;
+            appendOutput('You equipped ' + item.name + '.');
+            updateInventoryDisplay();
+        }
+
+        function cmdUnequip(slotName) {
+            if (!slotName) {
+                appendOutput('Specify slot to unequip: weapon or tool.');
+                return;
+            }
+            const slot = slotName.toLowerCase();
+            if (!['weapon', 'tool'].includes(slot)) {
+                appendOutput('Unknown slot: ' + slotName + '. Use weapon or tool.');
+                return;
+            }
+            if (!gameState.equipped[slot]) {
+                appendOutput('Nothing is equipped in ' + slot + '.');
+                return;
+            }
+            const item = gameState.equipped[slot];
+            gameState.inventory.push(item);
+            gameState.equipped[slot] = null;
+            appendOutput('You unequipped ' + item.name + '.');
+            updateInventoryDisplay();
+        }
+
+        // Combat
+        function cmdAttack(targetName) {
+            const room = gameState.world[gameState.currentRoom];
+            if (!room.enemies || room.enemies.length === 0) {
+                appendOutput('There are no enemies here to attack.');
+                return;
+            }
+
+            let enemy;
+            if (!targetName) {
+                enemy = room.enemies[0];
+            } else {
+                enemy = room.enemies.find(e => e.name.toLowerCase() === targetName.toLowerCase());
+            }
+            if (!enemy) {
+                appendOutput('No such enemy here: ' + (targetName || '') );
+                return;
+            }
+
+            appendOutput('You engage ' + enemy.name + '!');
+
+            // Simple turn-based fight until one side dies
+            const playerTurn = () => {
+                if (gameState.player.hp <= 0) return;
+                const weapon = gameState.equipped.weapon;
+                const base = gameState.player.baseDamage;
+                const damage = weapon ? (base + (weapon.damage || 0)) : base;
+                enemy.hp -= damage;
+                appendOutput('You hit ' + enemy.name + ' for ' + damage + ' damage. (' + Math.max(0, enemy.hp) + ' HP left)');
+                if (enemy.hp <= 0) {
+                    appendOutput('You defeated ' + enemy.name + '!');
+                    // Loot drop
+                    if (Math.random() < enemy.lootChance) {
+                        const loot = { ...getRandomItem(items) };
+                        // give some chance to drop coins specifically
+                        if (Math.random() > 0.6) loot = { name: 'coin', type: 'currency', value: 1, description: 'a shiny coin' };
+                        if (!room.ground) room.ground = [];
+                        room.ground.push(loot);
+                        appendOutput(enemy.name + ' dropped: ' + loot.name + '.');
+                    }
+                    // remove enemy
+                    const idx = room.enemies.indexOf(enemy);
+                    if (idx !== -1) room.enemies.splice(idx, 1);
+                    updateInventoryDisplay();
+                    return;
+                }
+                // enemy turn
+                setTimeout(enemyTurn, 600);
+            };
+
+            const enemyTurn = () => {
+                if (enemy.hp <= 0 || gameState.player.hp <= 0) return;
+                const ed = enemy.damage;
+                gameState.player.hp -= ed;
+                appendOutput(enemy.name + ' hits you for ' + ed + ' damage. (You: ' + Math.max(0, gameState.player.hp) + ' HP left)');
+                updateStatus();
+                if (gameState.player.hp <= 0) {
+                    appendOutput('You have been slain. Game over.');
+                    gameState.gameOver = true;
+                    document.getElementById('commandInput').disabled = true;
+                    return;
+                }
+                // back to player
+                setTimeout(playerTurn, 600);
+            };
+
+            // start combat
+            playerTurn();
+        }
+
+        // Trading
+        function cmdTrade(arg) {
+            const room = gameState.world[gameState.currentRoom];
+            if (!room.merchant) {
+                appendOutput('There is no merchant here to trade with.');
+                return;
+            }
+
+            if (!arg) {
+                // show merchant inventory
+                let text = 'Merchant (' + room.merchant.name + ') offers:\n';
+                room.merchant.inventory.forEach(it => {
+                    const price = Math.max(1, Math.floor((it.value || 1) * 1.2));
+                    text += '- ' + it.name + ' : ' + price + ' coins\n';
+                });
+                text += 'Use TRADE BUY [item] or TRADE SELL [item] to trade.';
+                appendOutput(text);
+                return;
+            }
+
+            const parts = arg.split(' ');
+            const action = parts[0];
+            const itemName = parts.slice(1).join(' ');
+            if (action === 'buy') {
+                const offer = room.merchant.inventory.find(i => i.name.toLowerCase() === itemName.toLowerCase());
+                if (!offer) { appendOutput('Merchant does not offer that item.'); return; }
+                const price = Math.max(1, Math.floor((offer.value || 1) * 1.2));
+                const coins = gameState.inventory.filter(i => i.type === 'currency');
+                const coinCount = coins.length;
+                if (coinCount < price) { appendOutput('You need ' + price + ' coins to buy ' + offer.name + '. You have ' + coinCount + '.'); return; }
+                // remove coins
+                let removed = 0;
+                for (let i = gameState.inventory.length-1; i >=0 && removed < price; i--) {
+                    if (gameState.inventory[i].type === 'currency') { gameState.inventory.splice(i,1); removed++; }
+                }
+                // give item
+                gameState.inventory.push({ ...offer });
+                appendOutput('You bought ' + offer.name + ' for ' + price + ' coins.');
+                // merchant removes sold item and gets coins
+                const idx = room.merchant.inventory.indexOf(offer);
+                if (idx !== -1) room.merchant.inventory.splice(idx,1);
+                updateInventoryDisplay();
+                return;
+            } else if (action === 'sell') {
+                const idx = gameState.inventory.findIndex(i => i.name.toLowerCase() === itemName.toLowerCase());
+                if (idx === -1) { appendOutput('You don\'t have that to sell.'); return; }
+                const item = gameState.inventory[idx];
+                const price = Math.max(1, Math.floor((item.value || 1) * 0.6));
+                // remove item from player
+                gameState.inventory.splice(idx,1);
+                // give coins
+                for (let i = 0; i < price; i++) gameState.inventory.push({ name: 'coin', type: 'currency', value: 1, description: 'a shiny coin' });
+                appendOutput('You sold ' + item.name + ' for ' + price + ' coins.');
+                // merchant takes item
+                room.merchant.inventory.push(item);
+                updateInventoryDisplay();
+                return;
+            } else {
+                appendOutput('Unknown trade action. Use TRADE BUY [item] or TRADE SELL [item].');
+            }
         }
 
         // Main Game Loop
@@ -388,6 +708,11 @@ QUIT           - End the game
         function initGame() {
             clearOutput();
             generateWorld();
+            // Give player a few starter items
+            gameState.inventory.push({ name: 'coin', type: 'currency', value: 1, description: 'a shiny coin' });
+            gameState.inventory.push({ name: 'coin', type: 'currency', value: 1, description: 'a shiny coin' });
+            gameState.inventory.push({ name: 'dagger', type: 'weapon', value: 20, description: 'a small dagger', damage: 6, equipSlot: 'weapon' });
+
             appendOutput('=== TEXT ADVENTURE GAME ===\n');
             appendOutput('Welcome, adventurer! You find yourself in a strange land.\n');
             appendOutput('Type HELP for a list of commands.\n');
