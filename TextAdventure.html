@@ -78,7 +78,7 @@
         <input type="text" id="commandInput" placeholder="Enter command...">
         <button onclick="submitCommand()">Execute</button>
         <div class="help-text">
-            Commands: GO (direction), TAKE (item), DROP (item), INSPECT (target), INVENTORY, LOOK, HELP, QUIT, EQUIP, UNEQUIP, ATTACK, TRADE
+            Commands: GO (direction), TAKE (item), DROP (item), INSPECT (target), INVENTORY, LOOK, HELP, QUIT, EQUIP, UNEQUIP, ATTACK, TRADE, USE (item)
         </div>
     </div>
 
@@ -123,6 +123,49 @@
         const merchantNames = ['Old Trader', 'Wandering Merchant', 'Peddler'];
 
         const directions = ['north', 'south', 'east', 'west'];
+
+        const potionEffects = [
+            { 
+                name: 'Healing Potion', 
+                effect: () => {
+                    const healed = Math.min(30, gameState.player.maxHp - gameState.player.hp);
+                    gameState.player.hp += healed;
+                    return 'You feel rejuvenated! Healed ' + healed + ' HP.';
+                }
+            },
+            { 
+                name: 'Strength Potion', 
+                effect: () => {
+                    const boost = 5;
+                    gameState.player.baseDamage += boost;
+                    setTimeout(() => { gameState.player.baseDamage -= boost; }, 30000);
+                    return 'Your strength surges! Base damage +' + boost + ' for 30 seconds.';
+                }
+            },
+            { 
+                name: 'Luck Potion', 
+                effect: () => {
+                    return 'You feel fortunate! Your next 3 item drops will be more valuable.';
+                }
+            },
+            { 
+                name: 'Poison Potion', 
+                effect: () => {
+                    const damage = 10;
+                    gameState.player.hp -= damage;
+                    return 'Uh oh! That was poison! You take ' + damage + ' damage.';
+                }
+            },
+            { 
+                name: 'Teleport Potion', 
+                effect: () => {
+                    const randomRoom = Math.floor(Math.random() * gameState.world.length);
+                    gameState.currentRoom = randomRoom;
+                    gameState.visited.add(randomRoom);
+                    return 'The potion whisks you away to a different location!';
+                }
+            }
+        ];
 
         function getRandomItem(arr) {
             return arr[Math.floor(Math.random() * arr.length)];
@@ -226,15 +269,24 @@
             if (gameState.inventory.length === 0) {
                 invDiv.innerHTML = '<strong>Inventory:</strong> (empty)';
             } else {
-                const itemsList = gameState.inventory.map(item => item.name + (item.type === 'currency' ? ' (x'+countCurrency(item.name)+')' : '')).join(', ');
+                // Count items by name to avoid duplicates
+                const itemCounts = {};
+                gameState.inventory.forEach(item => {
+                    if (!itemCounts[item.name]) {
+                        itemCounts[item.name] = 0;
+                    }
+                    itemCounts[item.name]++;
+                });
+
+                // Build display string
+                const itemsList = Object.keys(itemCounts).map(name => {
+                    const count = itemCounts[name];
+                    return name + (count > 1 ? ' (x' + count + ')' : '');
+                }).join(', ');
+
                 invDiv.innerHTML = '<strong>Inventory:</strong> ' + itemsList + '<br><strong>Equipped:</strong> Weapon: ' + weapon + ' | Tool: ' + tool;
             }
             updateStatus();
-        }
-
-        function countCurrency(name) {
-            // counts coins stack - each coin is separate item, so count occurrences
-            return gameState.inventory.filter(i => i.name === name).length;
         }
 
         function updateStatus() {
@@ -300,6 +352,9 @@
                     break;
                 case 'trade':
                     cmdTrade(arg);
+                    break;
+                case 'use':
+                    cmdUse(arg);
                     break;
                 default:
                     appendOutput('Unknown command: "' + command + '". Type HELP for available commands.');
@@ -423,9 +478,13 @@
                 const room = gameState.world[gameState.currentRoom];
                 const inspectable = [];
 
-                // Add inventory items
+                // Add inventory items (unique names only)
+                const seenNames = new Set();
                 gameState.inventory.forEach(item => {
-                    inspectable.push(item.name);
+                    if (!seenNames.has(item.name)) {
+                        inspectable.push(item.name);
+                        seenNames.add(item.name);
+                    }
                 });
 
                 // Add room item
@@ -433,7 +492,12 @@
                     inspectable.push(room.item.name);
                 }
 
-                if (room.ground) room.ground.forEach(i => inspectable.push(i.name));
+                if (room.ground) room.ground.forEach(i => {
+                    if (!seenNames.has(i.name)) {
+                        inspectable.push(i.name);
+                        seenNames.add(i.name);
+                    }
+                });
 
                 if (inspectable.length === 0) {
                     appendOutput('There is nothing to inspect here.');
@@ -515,6 +579,7 @@ EQUIP [item]   - Equip a weapon or tool
 UNEQUIP [slot] - Unequip weapon or tool
 ATTACK [enemy] - Attack an enemy in the room
 TRADE [buy/sell item] - Trade with a merchant if present
+USE [item]     - Use a consumable item (like potion)
 HELP           - Show this message
 QUIT           - End the game
 `;
@@ -527,6 +592,34 @@ QUIT           - End the game
             appendOutput('\nThanks for playing!');
             appendOutput('Final Score: ' + gameState.score);
             document.getElementById('commandInput').disabled = true;
+        }
+
+        // USE command for potions
+        function cmdUse(itemName) {
+            if (!itemName) {
+                const consumables = gameState.inventory.filter(i => i.type === 'consumable');
+                if (consumables.length === 0) {
+                    appendOutput('You have no consumable items to use.');
+                } else {
+                    appendOutput('You can use: ' + consumables.map(i => i.name).join(', '));
+                }
+                return;
+            }
+
+            const index = gameState.inventory.findIndex(i => i.name === itemName && i.type === 'consumable');
+            if (index === -1) {
+                appendOutput('You don\'t have a consumable item called "' + itemName + '".');
+                return;
+            }
+
+            const potion = gameState.inventory[index];
+            const effect = getRandomItem(potionEffects);
+            const message = effect.effect();
+            appendOutput('You drink ' + potion.description + '.');
+            appendOutput(effect.name + ': ' + message);
+            
+            gameState.inventory.splice(index, 1);
+            updateInventoryDisplay();
         }
 
         // EQUIP/UNEQUIP
