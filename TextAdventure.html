@@ -25,6 +25,8 @@
             margin-bottom: 20px;
             white-space: pre-wrap;
             word-wrap: break-word;
+            overflow-y: auto;
+            max-height: 400px;
         }
         .inventory {
             border-top: 2px solid #ffffff;
@@ -111,7 +113,8 @@
 
             directions.forEach(dir => {
                 if (Math.random() > 0.3) {
-                    exits[dir] = Math.floor(Math.random() * 100); // Random room ID
+                    // Fixed: Generate room IDs that actually exist (0-9)
+                    exits[dir] = Math.floor(Math.random() * 10);
                 }
             });
 
@@ -240,7 +243,12 @@
 
         function cmdTake(item) {
             if (!item) {
-                appendOutput('Take what? Specify an item.');
+                const room = gameState.world[gameState.currentRoom];
+                if (room.item) {
+                    appendOutput('You can take: ' + room.item.name);
+                } else {
+                    appendOutput('There are no items here to take.');
+                }
                 return;
             }
 
@@ -258,7 +266,12 @@
 
         function cmdDrop(item) {
             if (!item) {
-                appendOutput('Drop what? Specify an item from your inventory.');
+                if (gameState.inventory.length === 0) {
+                    appendOutput('You don\'t have anything to drop.');
+                } else {
+                    const items = gameState.inventory.map(i => i.name).join(', ');
+                    appendOutput('You can drop: ' + items);
+                }
                 return;
             }
 
@@ -277,7 +290,24 @@
 
         function cmdInspect(target) {
             if (!target) {
-                appendOutput('Inspect what?');
+                const room = gameState.world[gameState.currentRoom];
+                const inspectable = [];
+                
+                // Add inventory items
+                gameState.inventory.forEach(item => {
+                    inspectable.push(item.name);
+                });
+                
+                // Add room item
+                if (room.item) {
+                    inspectable.push(room.item.name);
+                }
+                
+                if (inspectable.length === 0) {
+                    appendOutput('There is nothing to inspect here.');
+                } else {
+                    appendOutput('You can inspect: ' + inspectable.join(', '));
+                }
                 return;
             }
 
