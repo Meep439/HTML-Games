@@ -91,7 +91,10 @@
             visited: new Set(),
             world: [],
             gameOver: false,
-            player: { hp: 100, maxHp: 100, baseDamage: 2 }
+            player: { hp: 100, maxHp: 100, baseDamage: 2 },
+            score: 0,
+            enemiesDefeated: 0,
+            itemsCollected: 0
         };
 
         // World Generation
@@ -236,7 +239,22 @@
 
         function updateStatus() {
             const status = document.getElementById('status');
-            status.textContent = 'HP: ' + gameState.player.hp + '/' + gameState.player.maxHp + '  |  Location: ' + gameState.world[gameState.currentRoom].type + '  |  Equipped: ' + (gameState.equipped.weapon ? gameState.equipped.weapon.name : 'none');
+            status.textContent = 'HP: ' + gameState.player.hp + '/' + gameState.player.maxHp + '  |  Location: ' + gameState.world[gameState.currentRoom].type + '  |  Score: ' + gameState.score;
+        }
+
+        function calculateScore() {
+            let score = 0;
+            // Base score from inventory value
+            gameState.inventory.forEach(item => {
+                score += item.value || 0;
+            });
+            // Bonus for enemies defeated
+            score += gameState.enemiesDefeated * 50;
+            // Bonus for items collected
+            score += gameState.itemsCollected * 10;
+            // Bonus for rooms visited
+            score += gameState.visited.size * 5;
+            return score;
         }
 
         // Game Commands
@@ -368,6 +386,7 @@
             }
 
             gameState.inventory.push(room.item);
+            gameState.itemsCollected++;
             appendOutput('You took ' + room.item.description + '.');
             room.item = null;
             updateInventoryDisplay();
@@ -504,7 +523,9 @@ QUIT           - End the game
 
         function cmdQuit() {
             gameState.gameOver = true;
+            gameState.score = calculateScore();
             appendOutput('\nThanks for playing!');
+            appendOutput('Final Score: ' + gameState.score);
             document.getElementById('commandInput').disabled = true;
         }
 
@@ -591,6 +612,8 @@ QUIT           - End the game
                 appendOutput('You hit ' + enemy.name + ' for ' + damage + ' damage. (' + Math.max(0, enemy.hp) + ' HP left)');
                 if (enemy.hp <= 0) {
                     appendOutput('You defeated ' + enemy.name + '!');
+                    gameState.enemiesDefeated++;
+                    gameState.score += 50;
                     // Loot drop
                     if (Math.random() < enemy.lootChance) {
                         const loot = { ...getRandomItem(items) };
@@ -617,7 +640,13 @@ QUIT           - End the game
                 appendOutput(enemy.name + ' hits you for ' + ed + ' damage. (You: ' + Math.max(0, gameState.player.hp) + ' HP left)');
                 updateStatus();
                 if (gameState.player.hp <= 0) {
+                    gameState.score = calculateScore();
                     appendOutput('You have been slain. Game over.');
+                    appendOutput('\n=== FINAL SCORE ===');
+                    appendOutput('Total Score: ' + gameState.score);
+                    appendOutput('Enemies Defeated: ' + gameState.enemiesDefeated);
+                    appendOutput('Rooms Explored: ' + gameState.visited.size);
+                    appendOutput('Items Collected: ' + gameState.itemsCollected);
                     gameState.gameOver = true;
                     document.getElementById('commandInput').disabled = true;
                     return;
@@ -712,7 +741,9 @@ QUIT           - End the game
             gameState.inventory.push({ name: 'coin', type: 'currency', value: 1, description: 'a shiny coin' });
             gameState.inventory.push({ name: 'coin', type: 'currency', value: 1, description: 'a shiny coin' });
             gameState.inventory.push({ name: 'dagger', type: 'weapon', value: 20, description: 'a small dagger', damage: 6, equipSlot: 'weapon' });
+            gameState.itemsCollected += 3;
 
+            gameState.score = calculateScore();
             appendOutput('=== TEXT ADVENTURE GAME ===\n');
             appendOutput('Welcome, adventurer! You find yourself in a strange land.\n');
             appendOutput('Type HELP for a list of commands.\n');
