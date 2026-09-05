@@ -85,16 +85,19 @@
     <script>
         // Game State
         let gameState = {
-            currentRoom: 0,
+            currentRoom: null,
             inventory: [],
             equipped: { weapon: null, tool: null },
             visited: new Set(),
-            world: [],
+            world: {},
             gameOver: false,
-            player: { hp: 100, maxHp: 100, baseDamage: 2 },
+            player: { hp: 100, maxHp: 100, baseDamage: 2, buffedDamageEndTurn: -1 },
             score: 0,
             enemiesDefeated: 0,
-            itemsCollected: 0
+            itemsCollected: 0,
+            turnCount: 0,
+            playerPositionX: 0,
+            playerPositionY: 0
         };
 
         // World Generation
@@ -137,9 +140,10 @@
                 name: 'Strength Potion', 
                 effect: () => {
                     const boost = 5;
+                    const currentTurn = gameState.turnCount;
+                    gameState.player.buffedDamageEndTurn = currentTurn + 5;
                     gameState.player.baseDamage += boost;
-                    setTimeout(() => { gameState.player.baseDamage -= boost; }, 30000);
-                    return 'Your strength surges! Base damage +' + boost + ' for 30 seconds.';
+                    return 'Your strength surges! Base damage +' + boost + ' for 5 turns.';
                 }
             },
             { 
@@ -159,9 +163,14 @@
             { 
                 name: 'Teleport Potion', 
                 effect: () => {
-                    const randomRoom = Math.floor(Math.random() * gameState.world.length);
-                    gameState.currentRoom = randomRoom;
-                    gameState.visited.add(randomRoom);
+                    const coordinates = Object.keys(gameState.world);
+                    if (coordinates.length === 0) return 'The potion fizzles...';
+                    const randomCoord = coordinates[Math.floor(Math.random() * coordinates.length)];
+                    gameState.currentRoom = randomCoord;
+                    const [x, y] = randomCoord.split(',').map(Number);
+                    gameState.playerPositionX = x;
+                    gameState.playerPositionY = y;
+                    gameState.visited.add(randomCoord);
                     return 'The potion whisks you away to a different location!';
                 }
             }
@@ -171,15 +180,23 @@
             return arr[Math.floor(Math.random() * arr.length)];
         }
 
-        function generateRoom(id) {
+        function generateRoom(x, y) {
             const type = getRandomItem(roomTypes);
             const hasItem = Math.random() > 0.5;
             const item = hasItem ? { ...getRandomItem(items) } : null;
             const exits = {};
 
-            directions.forEach(dir => {
+            // Create exits to adjacent rooms
+            const neighbors = [
+                { dir: 'north', dx: 0, dy: -1 },
+                { dir: 'south', dx: 0, dy: 1 },
+                { dir: 'east', dx: 1, dy: 0 },
+                { dir: 'west', dx: -1, dy: 0 }
+            ];
+
+            neighbors.forEach(n => {
                 if (Math.random() > 0.3) {
-                    exits[dir] = Math.floor(Math.random() * 10);
+                    exits[n.dir] = { x: x + n.dx, y: y + n.dy };
                 }
             });
 
@@ -189,13 +206,13 @@
             const enemies = Math.random() > 0.75 ? [generateEnemy()] : [];
 
             return {
-                id: id,
                 type: type,
                 item: item,
                 exits: exits,
                 description: getDescription(type),
                 merchant: merchant,
-                enemies: enemies
+                enemies: enemies,
+                ground: []
             };
         }
 
@@ -240,13 +257,21 @@
             return descriptions[type] || 'You are in an unknown place.';
         }
 
-        function generateWorld() {
-            gameState.world = [];
-            for (let i = 0; i < 10; i++) {
-                gameState.world.push(generateRoom(i));
+        function getOrCreateRoom(x, y) {
+            const key = x + ',' + y;
+            if (!gameState.world[key]) {
+                gameState.world[key] = generateRoom(x, y);
             }
-            gameState.currentRoom = 0;
-            gameState.visited.add(0);
+            return gameState.world[key];
+        }
+
+        function generateWorld() {
+            gameState.world = {};
+            gameState.currentRoom = '0,0';
+            gameState.playerPositionX = 0;
+            gameState.playerPositionY = 0;
+            gameState.visited.add('0,0');
+            getOrCreateRoom(0, 0);
         }
 
         // UI Functions
@@ -291,7 +316,9 @@
 
         function updateStatus() {
             const status = document.getElementById('status');
-            status.textContent = 'HP: ' + gameState.player.hp + '/' + gameState.player.maxHp + '  |  Location: ' + gameState.world[gameState.currentRoom].type + '  |  Score: ' + gameState.score;
+            const room = gameState.world[gameState.currentRoom];
+            const locationName = room ? room.type : 'unknown';
+            status.textContent = 'HP: ' + gameState.player.hp + '/' + gameState.player.maxHp + '  |  Turns: ' + gameState.turnCount + '  |  Location: ' + locationName + ' (' + gameState.playerPositionX + ',' + gameState.playerPositionY + ')  |  Score: ' + gameState.score;
         }
 
         function calculateScore() {
@@ -375,6 +402,10 @@
                 text += 'You see ' + room.item.description + ' here. (' + room.item.name + ')\n';
             }
 
+            if (room.ground && room.ground.length > 0) {
+                text += 'Items on ground: ' + room.ground.map(i => i.name).join(', ') + '\n';
+            }
+
             if (room.merchant) {
                 text += 'A merchant is here: ' + room.merchant.name + '. You can TRADE.\n';
             }
@@ -400,12 +431,20 @@
                 return;
             }
 
-            gameState.currentRoom = room.exits[direction];
+            const nextCoord = room.exits[direction];
+            gameState.currentRoom = nextCoord.x + ',' + nextCoord.y;
+            gameState.playerPositionX = nextCoord.x;
+            gameState.playerPositionY = nextCoord.y;
             gameState.visited.add(gameState.currentRoom);
+            gameState.turnCount++;
+
+            // Check if buff ended
+            checkBuffExpired();
+
             appendOutput('You travel ' + direction + '...\n');
 
-            // When entering a new room, chance to spawn enemy or merchant
-            const newRoom = gameState.world[gameState.currentRoom];
+            // Get or create the new room
+            const newRoom = getOrCreateRoom(nextCoord.x, nextCoord.y);
             if (!newRoom.merchant && Math.random() > 0.92) {
                 newRoom.merchant = generateMerchant();
                 appendOutput('You notice a merchant has arrived.\n');
@@ -421,30 +460,47 @@
         function cmdTake(itemName) {
             if (!itemName) {
                 const room = gameState.world[gameState.currentRoom];
-                if (room.item) {
-                    appendOutput('You can take: ' + room.item.name);
-                } else {
+                const availableItems = [];
+                if (room.item) availableItems.push(room.item.name);
+                if (room.ground) room.ground.forEach(i => availableItems.push(i.name));
+                if (availableItems.length === 0) {
                     appendOutput('There are no items here to take.');
+                } else {
+                    appendOutput('You can take: ' + availableItems.join(', '));
                 }
                 return;
             }
 
             const room = gameState.world[gameState.currentRoom];
-            if (!room.item || room.item.name !== itemName) {
-                appendOutput('You don\'t see "' + itemName + '" here.');
+            
+            // Check room item first
+            if (room.item && room.item.name === itemName) {
+                gameState.inventory.push(room.item);
+                gameState.itemsCollected++;
+                appendOutput('You took ' + room.item.description + '.');
+                room.item = null;
+                gameState.turnCount++;
+                checkBuffExpired();
+                updateInventoryDisplay();
                 return;
             }
 
-            // If coin, stack multiple
-            if (room.item.type === 'currency') {
-                // pick up all coins in room (for simplicity, single coin is used)
+            // Check ground items
+            if (room.ground) {
+                const groundIndex = room.ground.findIndex(i => i.name === itemName);
+                if (groundIndex !== -1) {
+                    const item = room.ground.splice(groundIndex, 1)[0];
+                    gameState.inventory.push(item);
+                    gameState.itemsCollected++;
+                    appendOutput('You took ' + item.description + '.');
+                    gameState.turnCount++;
+                    checkBuffExpired();
+                    updateInventoryDisplay();
+                    return;
+                }
             }
 
-            gameState.inventory.push(room.item);
-            gameState.itemsCollected++;
-            appendOutput('You took ' + room.item.description + '.');
-            room.item = null;
-            updateInventoryDisplay();
+            appendOutput('You don\'t see "' + itemName + '" here.');
         }
 
         function cmdDrop(itemName) {
@@ -466,10 +522,10 @@
 
             const droppedItem = gameState.inventory.splice(index, 1)[0];
             const room = gameState.world[gameState.currentRoom];
-            // If room already has item, drop places on ground as extra (convert to room.items array)
-            if (!room.ground) room.ground = [];
             room.ground.push(droppedItem);
             appendOutput('You dropped ' + droppedItem.description + '.');
+            gameState.turnCount++;
+            checkBuffExpired();
             updateInventoryDisplay();
         }
 
@@ -619,7 +675,17 @@ QUIT           - End the game
             appendOutput(effect.name + ': ' + message);
             
             gameState.inventory.splice(index, 1);
+            gameState.turnCount++;
+            checkBuffExpired();
             updateInventoryDisplay();
+        }
+
+        function checkBuffExpired() {
+            if (gameState.player.buffedDamageEndTurn !== -1 && gameState.turnCount >= gameState.player.buffedDamageEndTurn) {
+                gameState.player.baseDamage -= 5;
+                gameState.player.buffedDamageEndTurn = -1;
+                appendOutput('Your strength boost has worn off!');
+            }
         }
 
         // EQUIP/UNEQUIP
@@ -698,11 +764,13 @@ QUIT           - End the game
             // Simple turn-based fight until one side dies
             const playerTurn = () => {
                 if (gameState.player.hp <= 0) return;
+                checkBuffExpired();
                 const weapon = gameState.equipped.weapon;
                 const base = gameState.player.baseDamage;
                 const damage = weapon ? (base + (weapon.damage || 0)) : base;
                 enemy.hp -= damage;
                 appendOutput('You hit ' + enemy.name + ' for ' + damage + ' damage. (' + Math.max(0, enemy.hp) + ' HP left)');
+                gameState.turnCount++;
                 if (enemy.hp <= 0) {
                     appendOutput('You defeated ' + enemy.name + '!');
                     gameState.enemiesDefeated++;
@@ -712,7 +780,6 @@ QUIT           - End the game
                         const loot = { ...getRandomItem(items) };
                         // give some chance to drop coins specifically
                         if (Math.random() > 0.6) loot = { name: 'coin', type: 'currency', value: 1, description: 'a shiny coin' };
-                        if (!room.ground) room.ground = [];
                         room.ground.push(loot);
                         appendOutput(enemy.name + ' dropped: ' + loot.name + '.');
                     }
@@ -731,6 +798,7 @@ QUIT           - End the game
                 const ed = enemy.damage;
                 gameState.player.hp -= ed;
                 appendOutput(enemy.name + ' hits you for ' + ed + ' damage. (You: ' + Math.max(0, gameState.player.hp) + ' HP left)');
+                gameState.turnCount++;
                 updateStatus();
                 if (gameState.player.hp <= 0) {
                     gameState.score = calculateScore();
@@ -793,6 +861,8 @@ QUIT           - End the game
                 // merchant removes sold item and gets coins
                 const idx = room.merchant.inventory.indexOf(offer);
                 if (idx !== -1) room.merchant.inventory.splice(idx,1);
+                gameState.turnCount++;
+                checkBuffExpired();
                 updateInventoryDisplay();
                 return;
             } else if (action === 'sell') {
@@ -807,6 +877,8 @@ QUIT           - End the game
                 appendOutput('You sold ' + item.name + ' for ' + price + ' coins.');
                 // merchant takes item
                 room.merchant.inventory.push(item);
+                gameState.turnCount++;
+                checkBuffExpired();
                 updateInventoryDisplay();
                 return;
             } else {
@@ -835,6 +907,7 @@ QUIT           - End the game
             gameState.inventory.push({ name: 'coin', type: 'currency', value: 1, description: 'a shiny coin' });
             gameState.inventory.push({ name: 'dagger', type: 'weapon', value: 20, description: 'a small dagger', damage: 6, equipSlot: 'weapon' });
             gameState.itemsCollected += 3;
+            gameState.turnCount = 0;
 
             gameState.score = calculateScore();
             appendOutput('=== TEXT ADVENTURE GAME ===\n');
