@@ -313,6 +313,13 @@
             font-weight: bold;
         }
 
+        .player-rank {
+            font-weight: bold;
+            min-width: 25px;
+            text-align: right;
+            margin-right: 8px;
+        }
+
         .player-name {
             flex: 1;
             word-break: break-word;
@@ -587,7 +594,7 @@
             spawnSelected: false,
             selectedSpawn: null,
             gameTime: 0,
-            maxGameTime: 300000 // 5 minutes in milliseconds
+            maxGameTime: 300000
         };
 
         let canvas, ctx;
@@ -596,17 +603,38 @@
         let camera = { x: 0, y: 0, zoom: 1 };
         let lastUpdateTime = 0;
 
-        // Perlin-like noise for terrain generation
+        // Improved terrain generation with clustering
         function generateTerrain(width, height) {
             const terrain = Array(height).fill(null).map(() => Array(width).fill(TILE_TYPES.EMPTY));
             
-            for (let y = 0; y < height; y++) {
-                for (let x = 0; x < width; x++) {
-                    const noise = Math.sin(x * 0.1) * Math.cos(y * 0.1) + Math.sin(x * 0.05) * Math.cos(y * 0.05);
-                    if (noise > 0.5) {
-                        terrain[y][x] = TILE_TYPES.WATER;
-                    } else if (noise < -0.6) {
-                        terrain[y][x] = TILE_TYPES.MOUNTAIN;
+            // Generate water clusters
+            for (let i = 0; i < 8; i++) {
+                const centerX = Math.random() * width;
+                const centerY = Math.random() * height;
+                const radius = 8 + Math.random() * 12;
+                
+                for (let y = 0; y < height; y++) {
+                    for (let x = 0; x < width; x++) {
+                        const dist = Math.sqrt((x - centerX) ** 2 + (y - centerY) ** 2);
+                        if (dist < radius && Math.random() < 0.7) {
+                            terrain[y][x] = TILE_TYPES.WATER;
+                        }
+                    }
+                }
+            }
+            
+            // Generate mountain clusters
+            for (let i = 0; i < 6; i++) {
+                const centerX = Math.random() * width;
+                const centerY = Math.random() * height;
+                const radius = 6 + Math.random() * 10;
+                
+                for (let y = 0; y < height; y++) {
+                    for (let x = 0; x < width; x++) {
+                        const dist = Math.sqrt((x - centerX) ** 2 + (y - centerY) ** 2);
+                        if (dist < radius && Math.random() < 0.6) {
+                            terrain[y][x] = TILE_TYPES.MOUNTAIN;
+                        }
                     }
                 }
             }
@@ -718,12 +746,22 @@
                 }
             }
 
+            // Draw selected spawn with visual indicator
             if (gameState.selectedSpawn) {
-                spawnCtx.fillStyle = 'rgba(102, 126, 234, 0.5)';
+                // Draw fill
+                spawnCtx.fillStyle = 'rgba(102, 126, 234, 0.4)';
                 spawnCtx.fillRect(gameState.selectedSpawn.x * 20, gameState.selectedSpawn.y * 20, 20, 20);
+                
+                // Draw border
                 spawnCtx.strokeStyle = '#667eea';
                 spawnCtx.lineWidth = 3;
                 spawnCtx.strokeRect(gameState.selectedSpawn.x * 20, gameState.selectedSpawn.y * 20, 20, 20);
+                
+                // Draw center marker
+                spawnCtx.fillStyle = '#667eea';
+                spawnCtx.beginPath();
+                spawnCtx.arc(gameState.selectedSpawn.x * 20 + 10, gameState.selectedSpawn.y * 20 + 10, 4, 0, Math.PI * 2);
+                spawnCtx.fill();
             }
         }
 
@@ -753,7 +791,7 @@
             const worldY = Math.floor((screenY / camera.zoom + camera.y) / gameState.cellSize);
 
             if (worldX >= 0 && worldX < gameState.width && worldY >= 0 && worldY < gameState.height) {
-                expandTerritoryWave(0, worldX, worldY, 8); // Player ID is 0, expansion radius 8
+                expandTerritoryWave(0, worldX, worldY, 8);
             }
         }
 
@@ -816,12 +854,18 @@
             }
 
             const settings = DIFFICULTY_SETTINGS[gameState.difficulty];
+            const usedBotNames = new Set();
+            
             for (let i = 0; i < settings.bots; i++) {
-                const botName = BOT_NAMES[Math.floor(Math.random() * BOT_NAMES.length)];
+                let botName;
+                do {
+                    botName = BOT_NAMES[Math.floor(Math.random() * BOT_NAMES.length)];
+                } while (usedBotNames.has(botName));
+                usedBotNames.add(botName);
                 
                 let botSpawn = null;
                 let attempts = 0;
-                while (!botSpawn && attempts < 100) {
+                while (!botSpawn && attempts < 200) {
                     const x = Math.floor(Math.random() * gameState.width);
                     const y = Math.floor(Math.random() * gameState.height);
                     if (gameState.terrain[y][x] === TILE_TYPES.EMPTY && 
@@ -847,7 +891,6 @@
             }
         }
 
-        // Wave-based expansion (territorial.io style)
         function expandTerritoryWave(playerId, centerX, centerY, radius) {
             const player = gameState.players.find(p => p.id === playerId);
             if (!player) return;
@@ -856,7 +899,6 @@
             if (now - player.lastExpansion < 200) return;
             player.lastExpansion = now;
 
-            // BFS expansion from clicked point
             const toProcess = [{ x: centerX, y: centerY, dist: 0 }];
             const processed = new Set();
 
@@ -872,13 +914,11 @@
 
                 if (x < 0 || x >= gameState.width || y < 0 || y >= gameState.height) continue;
 
-                // If empty land and adjacent to player territory, claim it
                 if (gameState.terrain[y][x] === TILE_TYPES.EMPTY && gameState.cells[y][x] !== playerId) {
                     const isAdjacent = checkAdjacentOwnership(x, y, playerId);
                     if (isAdjacent || current.dist === 0) {
                         gameState.cells[y][x] = playerId;
                         
-                        // Add neighbors to process
                         const neighbors = [
                             { x: x + 1, y: y },
                             { x: x - 1, y: y },
@@ -922,12 +962,10 @@
             if (now - bot.lastExpansion < 300) return;
             bot.lastExpansion = now;
 
-            // Find random border cell of bot
             const botBorder = [];
             for (let y = 0; y < gameState.height; y++) {
                 for (let x = 0; x < gameState.width; x++) {
                     if (gameState.cells[y][x] === bot.id) {
-                        // Check if on border
                         const neighbors = [
                             { x: x + 1, y: y },
                             { x: x - 1, y: y },
@@ -997,8 +1035,9 @@
                 const entry = document.createElement('div');
                 entry.className = 'leaderboard-entry' + (player.id === 0 ? ' player' : '');
                 entry.innerHTML = `
+                    <span class="player-rank">#${player.rank}</span>
                     <span class="color-box" style="background: ${player.color};"></span>
-                    <span class="player-name">${player.rank}. ${player.name}</span>
+                    <span class="player-name">${player.name}</span>
                     <span class="player-percent">${percentage}%</span>
                 `;
                 leaderboardList.appendChild(entry);
@@ -1014,7 +1053,6 @@
             const endX = Math.ceil((camera.x + canvas.width / camera.zoom) / gameState.cellSize);
             const endY = Math.ceil((camera.y + canvas.height / camera.zoom) / gameState.cellSize);
 
-            // Draw terrain and cells
             for (let y = Math.max(0, startY); y < Math.min(gameState.height, endY); y++) {
                 for (let x = Math.max(0, startX); x < Math.min(gameState.width, endX); x++) {
                     const screenX = (x * gameState.cellSize - camera.x) * camera.zoom;
@@ -1036,7 +1074,6 @@
 
                     ctx.fillRect(screenX, screenY, cellScreenSize, cellScreenSize);
 
-                    // Draw cell borders if zoomed in enough
                     if (camera.zoom > 1.5) {
                         ctx.strokeStyle = 'rgba(0, 0, 0, 0.1)';
                         ctx.lineWidth = 0.5;
@@ -1058,7 +1095,6 @@
 
             updateLeaderboard();
 
-            // Check win/loss condition
             if (gameState.gameTime >= gameState.maxGameTime) {
                 endGame();
             } else if (playerStats === 0) {
@@ -1103,14 +1139,12 @@
 
             gameState.gameTime += deltaTime;
 
-            // Update bot AI
             gameState.players.forEach(player => {
                 if (player.isBot) {
                     botExpand(player);
                 }
             });
 
-            // Update stats and drawing
             updateStats();
             drawGame();
 
