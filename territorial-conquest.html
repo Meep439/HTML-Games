@@ -116,6 +116,90 @@
             transform: translateY(0);
         }
 
+        .spawn-screen {
+            display: none;
+            background: white;
+            border-radius: 15px;
+            padding: 40px;
+            box-shadow: 0 10px 40px rgba(0, 0, 0, 0.3);
+            text-align: center;
+            max-width: 900px;
+            width: 100%;
+            max-height: 90vh;
+            overflow: hidden;
+            flex-direction: column;
+        }
+
+        .spawn-screen h1 {
+            color: #667eea;
+            font-size: 2em;
+            margin-bottom: 20px;
+        }
+
+        .spawn-canvas-container {
+            flex: 1;
+            border: 2px solid #667eea;
+            border-radius: 10px;
+            overflow: hidden;
+            margin-bottom: 20px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            background: #f5f5f5;
+        }
+
+        #spawnCanvas {
+            max-width: 100%;
+            max-height: 100%;
+            border-radius: 8px;
+            cursor: crosshair;
+        }
+
+        .spawn-info {
+            color: #666;
+            margin-bottom: 15px;
+            font-size: 0.95em;
+        }
+
+        .spawn-buttons {
+            display: flex;
+            gap: 10px;
+            justify-content: center;
+        }
+
+        .spawn-btn {
+            padding: 12px 30px;
+            font-size: 1em;
+            font-weight: bold;
+            border: none;
+            border-radius: 8px;
+            cursor: pointer;
+            transition: all 0.3s;
+        }
+
+        .spawn-btn.confirm {
+            background: #4caf50;
+            color: white;
+        }
+
+        .spawn-btn.confirm:hover {
+            background: #45a049;
+        }
+
+        .spawn-btn.confirm:disabled {
+            background: #ccc;
+            cursor: not-allowed;
+        }
+
+        .spawn-btn.back {
+            background: #ddd;
+            color: #333;
+        }
+
+        .spawn-btn.back:hover {
+            background: #ccc;
+        }
+
         .game-container {
             display: none;
             background: white;
@@ -159,6 +243,12 @@
             font-weight: bold;
         }
 
+        .controls-info {
+            font-size: 0.85em;
+            opacity: 0.9;
+            text-align: center;
+        }
+
         .exit-btn {
             padding: 8px 16px;
             background: rgba(255, 255, 255, 0.2);
@@ -183,7 +273,11 @@
             flex: 1;
             border-right: 2px solid #ddd;
             background: #f5f5f5;
-            cursor: crosshair;
+            cursor: grab;
+        }
+
+        #gameCanvas:active {
+            cursor: grabbing;
         }
 
         .leaderboard {
@@ -399,6 +493,19 @@
         <button class="start-btn" id="startBtn">Start Game</button>
     </div>
 
+    <!-- Spawn Selection Screen -->
+    <div class="spawn-screen" id="spawnScreen">
+        <h1>Select Your Spawn Location</h1>
+        <p class="spawn-info">Click on the map to choose where you start. Green area = available land, Blue = water (blocked), Gray = mountains (blocked)</p>
+        <div class="spawn-canvas-container">
+            <canvas id="spawnCanvas"></canvas>
+        </div>
+        <div class="spawn-buttons">
+            <button class="spawn-btn back" id="backBtn">Back</button>
+            <button class="spawn-btn confirm" id="confirmSpawnBtn" disabled>Confirm Spawn</button>
+        </div>
+    </div>
+
     <!-- Game Screen -->
     <div class="game-container" id="gameContainer">
         <div class="game-header">
@@ -415,6 +522,9 @@
                     <span class="info-label">Rank</span>
                     <span class="info-value" id="playerRank">-</span>
                 </div>
+            </div>
+            <div class="controls-info">
+                Scroll to zoom | Drag to pan | Click to expand
             </div>
             <button class="exit-btn" id="exitBtn">Exit Game</button>
         </div>
@@ -453,6 +563,13 @@
             'Echo', 'Inferno', 'Specter', 'Zenith', 'Surge'
         ];
 
+        const TILE_TYPES = {
+            EMPTY: 0,
+            WATER: 1,
+            MOUNTAIN: 2,
+            PLAYER: 3
+        };
+
         const DIFFICULTY_SETTINGS = {
             easy: { bots: 3, botSkill: 0.4, botExpansionSpeed: 0.015 },
             normal: { bots: 5, botSkill: 0.6, botExpansionSpeed: 0.025 },
@@ -465,21 +582,47 @@
             difficulty: 'normal',
             playerName: '',
             playerColor: null,
-            selectedCells: new Set(),
             players: [],
+            terrain: [],
             cells: [],
-            width: 0,
-            height: 0,
-            cellSize: 0,
-            totalCells: 0
+            width: 100,
+            height: 100,
+            cellSize: 30,
+            totalCells: 0,
+            spawnSelected: false,
+            selectedSpawn: null
         };
 
         let canvas, ctx;
+        let spawnCanvas, spawnCtx;
         let animationId;
+        let camera = { x: 0, y: 0, zoom: 1 };
+        let isPanning = false;
+        let panStart = { x: 0, y: 0 };
+
+        // Perlin-like noise for terrain generation
+        function generateTerrain(width, height) {
+            const terrain = Array(height).fill(null).map(() => Array(width).fill(TILE_TYPES.EMPTY));
+            
+            // Generate water
+            for (let y = 0; y < height; y++) {
+                for (let x = 0; x < width; x++) {
+                    const noise = Math.sin(x * 0.1) * Math.cos(y * 0.1) + Math.sin(x * 0.05) * Math.cos(y * 0.05);
+                    if (noise > 0.5) {
+                        terrain[y][x] = TILE_TYPES.WATER;
+                    } else if (noise < -0.6) {
+                        terrain[y][x] = TILE_TYPES.MOUNTAIN;
+                    }
+                }
+            }
+            
+            return terrain;
+        }
 
         // Initialize
         document.addEventListener('DOMContentLoaded', () => {
             setupMenu();
+            setupSpawnScreen();
             setupGame();
         });
 
@@ -503,12 +646,94 @@
                     return;
                 }
                 gameState.playerName = playerName;
-                startGame();
+                showSpawnScreen();
             });
 
             playerNameInput.addEventListener('keypress', (e) => {
                 if (e.key === 'Enter') startBtn.click();
             });
+        }
+
+        function setupSpawnScreen() {
+            spawnCanvas = document.getElementById('spawnCanvas');
+            spawnCtx = spawnCanvas.getContext('2d');
+
+            document.getElementById('backBtn').addEventListener('click', () => {
+                document.getElementById('spawnScreen').style.display = 'none';
+                document.getElementById('menuScreen').style.display = 'block';
+                gameState.spawnSelected = false;
+                gameState.selectedSpawn = null;
+            });
+
+            document.getElementById('confirmSpawnBtn').addEventListener('click', () => {
+                if (gameState.selectedSpawn !== null) {
+                    startGame();
+                }
+            });
+
+            spawnCanvas.addEventListener('click', (e) => {
+                const rect = spawnCanvas.getBoundingClientRect();
+                const x = Math.floor((e.clientX - rect.left) / 20);
+                const y = Math.floor((e.clientY - rect.top) / 20);
+
+                if (x >= 0 && x < gameState.width && y >= 0 && y < gameState.height) {
+                    if (gameState.terrain[y] && gameState.terrain[y][x] === TILE_TYPES.EMPTY) {
+                        gameState.selectedSpawn = { x, y };
+                        gameState.spawnSelected = true;
+                        document.getElementById('confirmSpawnBtn').disabled = false;
+                        drawSpawnMap();
+                    }
+                }
+            });
+        }
+
+        function showSpawnScreen() {
+            // Generate terrain if not already done
+            if (gameState.terrain.length === 0) {
+                gameState.terrain = generateTerrain(gameState.width, gameState.height);
+            }
+
+            document.getElementById('menuScreen').style.display = 'none';
+            document.getElementById('spawnScreen').style.display = 'flex';
+            
+            // Set canvas size
+            spawnCanvas.width = gameState.width * 20;
+            spawnCanvas.height = gameState.height * 20;
+            
+            drawSpawnMap();
+        }
+
+        function drawSpawnMap() {
+            spawnCtx.fillStyle = '#2ecc71';
+            spawnCtx.fillRect(0, 0, spawnCanvas.width, spawnCanvas.height);
+
+            // Draw terrain
+            for (let y = 0; y < gameState.height; y++) {
+                for (let x = 0; x < gameState.width; x++) {
+                    const tileType = gameState.terrain[y][x];
+                    let color;
+
+                    if (tileType === TILE_TYPES.WATER) {
+                        color = '#3498db';
+                    } else if (tileType === TILE_TYPES.MOUNTAIN) {
+                        color = '#7f8c8d';
+                    } else {
+                        color = '#2ecc71';
+                    }
+
+                    spawnCtx.fillStyle = color;
+                    spawnCtx.fillRect(x * 20, y * 20, 20, 20);
+                }
+            }
+
+            // Draw selected spawn
+            if (gameState.selectedSpawn) {
+                spawnCtx.fillStyle = 'rgba(102, 126, 234, 0.5)';
+                spawnCtx.fillRect(gameState.selectedSpawn.x * 20, gameState.selectedSpawn.y * 20, 20, 20);
+                spawnCtx.strokeStyle = '#667eea';
+                spawnCtx.lineWidth = 3;
+                spawnCtx.strokeRect(gameState.selectedSpawn.x * 20, gameState.selectedSpawn.y * 20, 20, 20);
+            }
         }
 
         function setupGame() {
@@ -518,58 +743,92 @@
             document.getElementById('exitBtn').addEventListener('click', exitGame);
             document.getElementById('playAgainBtn').addEventListener('click', () => {
                 document.getElementById('gameOverModal').style.display = 'none';
-                startGame();
+                showSpawnScreen();
             });
             document.getElementById('menuBtn').addEventListener('click', returnToMenu);
 
-            // Resize canvas and start game when visible
+            // Mouse/touch controls for panning and zooming
+            canvas.addEventListener('mousedown', handlePanStart);
+            canvas.addEventListener('mousemove', handlePanMove);
+            canvas.addEventListener('mouseup', handlePanEnd);
+            canvas.addEventListener('wheel', handleZoom, { passive: false });
+            canvas.addEventListener('click', handleCanvasClick);
+
             window.addEventListener('resize', resizeCanvas);
+        }
+
+        function handlePanStart(e) {
+            if (!gameState.isRunning) return;
+            isPanning = true;
+            panStart.x = e.clientX;
+            panStart.y = e.clientY;
+        }
+
+        function handlePanMove(e) {
+            if (!isPanning || !gameState.isRunning) return;
+            const dx = e.clientX - panStart.x;
+            const dy = e.clientY - panStart.y;
+            camera.x -= dx / camera.zoom;
+            camera.y -= dy / camera.zoom;
+            panStart.x = e.clientX;
+            panStart.y = e.clientY;
+        }
+
+        function handlePanEnd() {
+            isPanning = false;
+        }
+
+        function handleZoom(e) {
+            if (!gameState.isRunning) return;
+            e.preventDefault();
+            const zoomFactor = e.deltaY > 0 ? 0.9 : 1.1;
+            camera.zoom *= zoomFactor;
+            camera.zoom = Math.max(0.5, Math.min(3, camera.zoom));
+        }
+
+        function handleCanvasClick(e) {
+            if (!gameState.isRunning || isPanning) return;
+            const rect = canvas.getBoundingClientRect();
+            const screenX = e.clientX - rect.left;
+            const screenY = e.clientY - rect.top;
+            
+            const worldX = Math.floor((screenX / camera.zoom + camera.x) / gameState.cellSize);
+            const worldY = Math.floor((screenY / camera.zoom + camera.y) / gameState.cellSize);
+
+            if (worldX >= 0 && worldX < gameState.width && worldY >= 0 && worldY < gameState.height) {
+                expandTerritory(worldX, worldY);
+            }
         }
 
         function resizeCanvas() {
             if (!gameState.isRunning) return;
             canvas.width = canvas.clientWidth;
             canvas.height = canvas.clientHeight;
-            initializeGameBoard();
         }
 
         function startGame() {
-            document.getElementById('menuScreen').style.display = 'none';
+            document.getElementById('spawnScreen').style.display = 'none';
             document.getElementById('gameContainer').style.display = 'flex';
             
             gameState.isRunning = true;
+            gameState.totalCells = gameState.width * gameState.height;
+            
             resizeCanvas();
             setupGamePlayers();
             setupGameControls();
-            gameLoop();
-        }
-
-        function initializeGameBoard() {
-            gameState.width = canvas.width;
-            gameState.height = canvas.height;
-            gameState.cellSize = 30;
-            gameState.cols = Math.ceil(gameState.width / gameState.cellSize);
-            gameState.rows = Math.ceil(gameState.height / gameState.cellSize);
-            gameState.totalCells = gameState.cols * gameState.rows;
-
-            // Initialize cells if first time
-            if (gameState.cells.length === 0) {
-                gameState.cells = Array(gameState.rows * gameState.cols).fill(null);
-                
-                // Distribute starting territories
-                const startCells = Math.max(5, Math.floor(gameState.totalCells / (gameState.players.length * 8)));
-                gameState.players.forEach(player => {
-                    for (let i = 0; i < startCells; i++) {
-                        const randomCell = Math.floor(Math.random() * gameState.totalCells);
-                        gameState.cells[randomCell] = player.id;
-                    }
-                });
+            
+            // Center camera on player spawn
+            if (gameState.selectedSpawn) {
+                camera.x = gameState.selectedSpawn.x * gameState.cellSize - canvas.width / (2 * camera.zoom);
+                camera.y = gameState.selectedSpawn.y * gameState.cellSize - canvas.height / (2 * camera.zoom);
             }
+            
+            gameLoop();
         }
 
         function setupGamePlayers() {
             gameState.players = [];
-            gameState.selectedCells.clear();
+            gameState.cells = Array(gameState.height).fill(null).map(() => Array(gameState.width).fill(null));
 
             const colors = [
                 '#667eea', // Player
@@ -588,10 +847,31 @@
                 exp: 0
             });
 
+            // Place player at spawn
+            if (gameState.selectedSpawn) {
+                gameState.cells[gameState.selectedSpawn.y][gameState.selectedSpawn.x] = 0;
+            }
+
             // Bots
             const settings = DIFFICULTY_SETTINGS[gameState.difficulty];
             for (let i = 0; i < settings.bots; i++) {
                 const botName = BOT_NAMES[Math.floor(Math.random() * BOT_NAMES.length)];
+                
+                // Find random spawn for bot
+                let botSpawn = null;
+                let attempts = 0;
+                while (!botSpawn && attempts < 100) {
+                    const x = Math.floor(Math.random() * gameState.width);
+                    const y = Math.floor(Math.random() * gameState.height);
+                    if (gameState.terrain[y][x] === TILE_TYPES.EMPTY && 
+                        gameState.cells[y][x] === null &&
+                        !(gameState.selectedSpawn && x === gameState.selectedSpawn.x && y === gameState.selectedSpawn.y)) {
+                        botSpawn = { x, y };
+                        gameState.cells[y][x] = i + 1;
+                    }
+                    attempts++;
+                }
+
                 gameState.players.push({
                     id: i + 1,
                     name: botName,
@@ -601,62 +881,41 @@
                     expansionSpeed: settings.botExpansionSpeed,
                     lastExpansion: 0,
                     rank: 1,
-                    exp: 0
+                    exp: 0,
+                    spawn: botSpawn
                 });
             }
         }
 
         function setupGameControls() {
-            canvas.addEventListener('click', (e) => {
-                if (!gameState.isRunning) return;
-                const rect = canvas.getBoundingClientRect();
-                const x = e.clientX - rect.left;
-                const y = e.clientY - rect.top;
-                
-                const col = Math.floor(x / gameState.cellSize);
-                const row = Math.floor(y / gameState.cellSize);
-                const cellIndex = row * gameState.cols + col;
-
-                if (cellIndex >= 0 && cellIndex < gameState.cells.length) {
-                    expandTerritory(cellIndex);
-                }
-            });
+            // Handled in event listeners
         }
 
-        function expandTerritory(targetCell) {
-            if (gameState.cells[targetCell] === 0) return; // Already owned
-
-            const col = targetCell % gameState.cols;
-            const row = Math.floor(targetCell / gameState.cols);
+        function expandTerritory(x, y) {
+            // Check if tile is valid
+            if (gameState.terrain[y][x] !== TILE_TYPES.EMPTY) return;
+            if (gameState.cells[y][x] === 0) return; // Already owned
 
             // Check if adjacent to player territory
             let isAdjacent = false;
-            const adjacentCells = getAdjacentCells(row, col);
-            for (let adj of adjacentCells) {
-                if (gameState.cells[adj] === 0) {
-                    isAdjacent = true;
-                    break;
-                }
-            }
-
-            if (isAdjacent || gameState.selectedCells.size === 0) {
-                gameState.cells[targetCell] = 0;
-            }
-        }
-
-        function getAdjacentCells(row, col) {
-            const adjacent = [];
-            for (let r = -1; r <= 1; r++) {
-                for (let c = -1; c <= 1; c++) {
-                    if (r === 0 && c === 0) continue;
-                    const newRow = row + r;
-                    const newCol = col + c;
-                    if (newRow >= 0 && newRow < gameState.rows && newCol >= 0 && newCol < gameState.cols) {
-                        adjacent.push(newRow * gameState.cols + newCol);
+            for (let dy = -1; dy <= 1; dy++) {
+                for (let dx = -1; dx <= 1; dx++) {
+                    if (dx === 0 && dy === 0) continue;
+                    const nx = x + dx;
+                    const ny = y + dy;
+                    if (nx >= 0 && nx < gameState.width && ny >= 0 && ny < gameState.height) {
+                        if (gameState.cells[ny][nx] === 0) {
+                            isAdjacent = true;
+                            break;
+                        }
                     }
                 }
+                if (isAdjacent) break;
             }
-            return adjacent;
+
+            if (isAdjacent) {
+                gameState.cells[y][x] = 0;
+            }
         }
 
         function botExpand(bot) {
@@ -666,59 +925,65 @@
 
             // Find cells owned by bot
             const botCells = [];
-            for (let i = 0; i < gameState.cells.length; i++) {
-                if (gameState.cells[i] === bot.id) {
-                    botCells.push(i);
+            for (let y = 0; y < gameState.height; y++) {
+                for (let x = 0; x < gameState.width; x++) {
+                    if (gameState.cells[y][x] === bot.id) {
+                        botCells.push({ x, y });
+                    }
                 }
             }
 
             if (botCells.length === 0) return;
 
-            // Random bot cells to try expanding from
+            // Try expanding from random bot cells
             const attempts = Math.ceil(botCells.length * bot.expansionSpeed);
             for (let i = 0; i < attempts; i++) {
-                const botCell = botCells[Math.floor(Math.random() * botCells.length)];
-                const row = Math.floor(botCell / gameState.cols);
-                const col = botCell % gameState.cols;
-                const adjacent = getAdjacentCells(row, col);
-
-                const targetCell = adjacent[Math.floor(Math.random() * adjacent.length)];
-                if (Math.random() < bot.skill) {
-                    gameState.cells[targetCell] = bot.id;
+                const cell = botCells[Math.floor(Math.random() * botCells.length)];
+                
+                // Try expanding to adjacent cells
+                const directions = [
+                    { x: 0, y: -1 }, { x: 1, y: 0 }, { x: 0, y: 1 }, { x: -1, y: 0 }
+                ];
+                
+                for (let dir of directions) {
+                    const nx = cell.x + dir.x;
+                    const ny = cell.y + dir.y;
+                    
+                    if (nx >= 0 && nx < gameState.width && ny >= 0 && ny < gameState.height) {
+                        if (gameState.terrain[ny][nx] === TILE_TYPES.EMPTY && 
+                            gameState.cells[ny][nx] !== bot.id &&
+                            Math.random() < bot.skill) {
+                            gameState.cells[ny][nx] = bot.id;
+                        }
+                    }
                 }
             }
-        }
-
-        function updatePlayerRanks() {
-            // Calculate territory percentage for each player
-            const territoryCounts = {};
-            gameState.players.forEach(p => terroryCounts[p.id] = 0);
-
-            gameState.cells.forEach(cellOwner => {
-                if (cellOwner !== null) {
-                    territoryCounts[cellOwner]++;
-                }
-            });
-
-            // Sort players by territory
-            const sortedPlayers = [...gameState.players].sort((a, b) => {
-                return (territoryCounts[b.id] || 0) - (territoryCounts[a.id] || 0);
-            });
-
-            sortedPlayers.forEach((player, index) => {
-                player.rank = index + 1;
-            });
         }
 
         function getPlayerStats() {
             const stats = {};
             gameState.players.forEach(p => stats[p.id] = 0);
 
-            gameState.cells.forEach(cellOwner => {
-                if (cellOwner !== null) stats[cellOwner]++;
-            });
+            for (let y = 0; y < gameState.height; y++) {
+                for (let x = 0; x < gameState.width; x++) {
+                    if (gameState.cells[y][x] !== null) {
+                        stats[gameState.cells[y][x]]++;
+                    }
+                }
+            }
 
             return stats;
+        }
+
+        function updatePlayerRanks() {
+            const stats = getPlayerStats();
+            const sorted = [...gameState.players].sort((a, b) => {
+                return (stats[b.id] || 0) - (stats[a.id] || 0);
+            });
+
+            sorted.forEach((player, index) => {
+                player.rank = index + 1;
+            });
         }
 
         function updateLeaderboard() {
@@ -750,10 +1015,10 @@
         function checkGameOver() {
             const stats = getPlayerStats();
             const playerTerritory = stats[0] || 0;
-            const totalTerritory = Object.values(stats).reduce((a, b) => a + b, 0);
 
-            // Win condition: player has 50%+ of all territory
-            if (playerTerritory > gameState.totalCells * 0.5) {
+            // Win condition: player has 50%+ of playable territory
+            const playableCells = gameState.totalCells - countTerrain(TILE_TYPES.WATER) - countTerrain(TILE_TYPES.MOUNTAIN);
+            if (playerTerritory > playableCells * 0.5) {
                 endGame(true);
                 return true;
             }
@@ -767,18 +1032,26 @@
             return false;
         }
 
+        function countTerrain(type) {
+            let count = 0;
+            for (let y = 0; y < gameState.height; y++) {
+                for (let x = 0; x < gameState.width; x++) {
+                    if (gameState.terrain[y][x] === type) count++;
+                }
+            }
+            return count;
+        }
+
         function endGame(playerWon) {
             gameState.isRunning = false;
             const stats = getPlayerStats();
             const playerTerritory = stats[0] || 0;
             const percentage = ((playerTerritory / gameState.totalCells) * 100).toFixed(1);
 
-            // Calculate rank and exp
             updatePlayerRanks();
             const player = gameState.players[0];
             const rank = player.rank;
             
-            // Exp based on rank and victory
             let expEarned = 0;
             if (playerWon) {
                 expEarned = 500 + (rank - 1) * 50;
@@ -818,47 +1091,66 @@
             const percentage = ((playerTerritory / gameState.totalCells) * 100).toFixed(1);
 
             document.getElementById('playerTerritory').textContent = percentage + '%';
-            
             updateLeaderboard();
         }
 
         function drawGame() {
-            ctx.fillStyle = '#f5f5f5';
-            ctx.fillRect(0, 0, gameState.width, gameState.height);
+            const width = canvas.width / camera.zoom;
+            const height = canvas.height / camera.zoom;
 
-            // Draw grid
-            ctx.strokeStyle = '#ddd';
-            ctx.lineWidth = 0.5;
-            for (let i = 0; i <= gameState.cols; i++) {
-                ctx.beginPath();
-                ctx.moveTo(i * gameState.cellSize, 0);
-                ctx.lineTo(i * gameState.cellSize, gameState.height);
-                ctx.stroke();
-            }
-            for (let i = 0; i <= gameState.rows; i++) {
-                ctx.beginPath();
-                ctx.moveTo(0, i * gameState.cellSize);
-                ctx.lineTo(gameState.width, i * gameState.cellSize);
-                ctx.stroke();
-            }
+            ctx.fillStyle = '#2ecc71';
+            ctx.fillRect(0, 0, canvas.width, canvas.height);
 
-            // Draw cells
-            for (let i = 0; i < gameState.cells.length; i++) {
-                const owner = gameState.cells[i];
-                if (owner !== null) {
-                    const player = gameState.players[owner];
-                    const col = i % gameState.cols;
-                    const row = Math.floor(i / gameState.cols);
+            ctx.save();
+            ctx.scale(camera.zoom, camera.zoom);
+            ctx.translate(-camera.x, -camera.y);
 
-                    ctx.fillStyle = player.color;
+            // Draw terrain and cells
+            for (let y = Math.max(0, Math.floor(camera.y / gameState.cellSize)); 
+                 y < Math.min(gameState.height, Math.ceil((camera.y + height) / gameState.cellSize)); y++) {
+                for (let x = Math.max(0, Math.floor(camera.x / gameState.cellSize));
+                     x < Math.min(gameState.width, Math.ceil((camera.x + width) / gameState.cellSize)); x++) {
+                    
+                    const terrainType = gameState.terrain[y][x];
+                    const cellOwner = gameState.cells[y][x];
+
+                    // Draw base terrain
+                    if (terrainType === TILE_TYPES.WATER) {
+                        ctx.fillStyle = '#3498db';
+                    } else if (terrainType === TILE_TYPES.MOUNTAIN) {
+                        ctx.fillStyle = '#7f8c8d';
+                    } else if (cellOwner !== null) {
+                        ctx.fillStyle = gameState.players[cellOwner].color;
+                    } else {
+                        ctx.fillStyle = '#2ecc71';
+                    }
+
                     ctx.fillRect(
-                        col * gameState.cellSize + 1,
-                        row * gameState.cellSize + 1,
-                        gameState.cellSize - 2,
-                        gameState.cellSize - 2
+                        x * gameState.cellSize,
+                        y * gameState.cellSize,
+                        gameState.cellSize - 1,
+                        gameState.cellSize - 1
                     );
                 }
             }
+
+            // Draw grid
+            ctx.strokeStyle = 'rgba(0, 0, 0, 0.1)';
+            ctx.lineWidth = 0.5 / camera.zoom;
+            for (let y = 0; y <= gameState.height; y++) {
+                ctx.beginPath();
+                ctx.moveTo(0, y * gameState.cellSize);
+                ctx.lineTo(gameState.width * gameState.cellSize, y * gameState.cellSize);
+                ctx.stroke();
+            }
+            for (let x = 0; x <= gameState.width; x++) {
+                ctx.beginPath();
+                ctx.moveTo(x * gameState.cellSize, 0);
+                ctx.lineTo(x * gameState.cellSize, gameState.height * gameState.cellSize);
+                ctx.stroke();
+            }
+
+            ctx.restore();
         }
 
         function gameLoop() {
@@ -890,12 +1182,18 @@
 
         function returnToMenu() {
             gameState.isRunning = false;
+            gameState.terrain = [];
             gameState.cells = [];
             gameState.players = [];
+            gameState.spawnSelected = false;
+            gameState.selectedSpawn = null;
+            camera = { x: 0, y: 0, zoom: 1 };
+            
             document.getElementById('menuScreen').style.display = 'block';
             document.getElementById('gameContainer').style.display = 'none';
             document.getElementById('gameOverModal').style.display = 'none';
             document.getElementById('playerName').value = '';
+            document.getElementById('confirmSpawnBtn').disabled = true;
             
             if (animationId) {
                 cancelAnimationFrame(animationId);
