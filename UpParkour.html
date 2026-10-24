@@ -1,1 +1,958 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Skyline Hook</title>
+  <style>
+    :root {
+      --bg1: #091423;
+      --bg2: #112f46;
+      --panel: rgba(12, 18, 33, 0.8);
+      --panel-alt: rgba(14, 27, 41, 0.9);
+      --line: rgba(152, 211, 255, 0.3);
+      --text: #eaf6ff;
+      --muted: #9ec2d9;
+      --gold: #ffd166;
+      --cyan: #7ae3ff;
+      --lime: #9af5b5;
+      --rose: #ff7b7b;
+      --violet: #af8cff;
+      --shadow: rgba(0, 0, 0, 0.35);
+    }
 
+    * {
+      box-sizing: border-box;
+    }
+
+    html, body {
+      margin: 0;
+      width: 100%;
+      height: 100%;
+      background: radial-gradient(circle at top, #183a5a 0%, var(--bg1) 38%, #050d18 100%);
+      color: var(--text);
+      font-family: Arial, Helvetica, sans-serif;
+      overflow: hidden;
+    }
+
+    body {
+      display: flex;
+      align-items: center;
+      justify-content: center;
+    }
+
+    #game-shell {
+      position: relative;
+      width: min(96vw, 980px);
+      height: min(90vh, 640px);
+      border: 2px solid var(--line);
+      border-radius: 18px;
+      overflow: hidden;
+      background: rgba(8, 13, 24, 0.82);
+      box-shadow: 0 22px 60px rgba(0,0,0,0.42);
+    }
+
+    canvas {
+      display: block;
+      width: 100%;
+      height: 100%;
+      background: linear-gradient(#0c1b2b 0%, #112f46 52%, #17182d 100%);
+    }
+
+    #hud {
+      position: absolute;
+      left: 12px;
+      top: 12px;
+      right: 12px;
+      display: flex;
+      gap: 10px;
+      justify-content: space-between;
+      align-items: center;
+      pointer-events: none;
+      z-index: 4;
+    }
+
+    .stat {
+      min-width: 120px;
+      padding: 8px 12px;
+      border: 1px solid rgba(122, 227, 255, 0.35);
+      background: rgba(11, 18, 28, 0.55);
+      border-radius: 10px;
+      backdrop-filter: blur(4px);
+      box-shadow: inset 0 1px 0 rgba(255,255,255,0.07);
+    }
+
+    .label {
+      font-size: 11px;
+      letter-spacing: 0.12em;
+      text-transform: uppercase;
+      color: var(--muted);
+      display: block;
+      margin-bottom: 3px;
+    }
+
+    .value {
+      font-size: 17px;
+      font-weight: 700;
+      color: var(--text);
+    }
+
+    #shop {
+      position: absolute;
+      right: 14px;
+      bottom: 14px;
+      display: flex;
+      flex-direction: column;
+      gap: 8px;
+      z-index: 5;
+      width: 200px;
+    }
+
+    .shop-item {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      gap: 10px;
+      width: 100%;
+      padding: 8px 10px;
+      border: 1px solid rgba(255,255,255,0.12);
+      border-radius: 10px;
+      background: rgba(14, 22, 35, 0.72);
+      cursor: pointer;
+      color: var(--text);
+      transition: 0.15s ease;
+    }
+
+    .shop-item:hover:not(:disabled) {
+      transform: translateY(-1px);
+      border-color: rgba(122, 227, 255, 0.6);
+      box-shadow: 0 0 0 1px rgba(122, 227, 255, 0.3);
+    }
+
+    .shop-item:disabled {
+      opacity: 0.5;
+      cursor: default;
+    }
+
+    .shop-item.active {
+      background: rgba(30, 88, 104, 0.82);
+      border-color: rgba(122, 227, 255, 0.9);
+      box-shadow: inset 0 0 0 1px rgba(122, 227, 255, 0.25);
+    }
+
+    .shop-name {
+      font-size: 12px;
+      font-weight: 700;
+      line-height: 1.2;
+      margin-right: auto;
+    }
+
+    .shop-cost {
+      font-size: 11px;
+      padding: 4px 7px;
+      border-radius: 999px;
+      background: rgba(255, 209, 102, 0.17);
+      color: var(--gold);
+      border: 1px solid rgba(255,209,102,0.3);
+      font-weight: 700;
+      white-space: nowrap;
+    }
+
+    #overlay {
+      position: absolute;
+      inset: 0;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      z-index: 6;
+      background: rgba(4, 9, 17, 0.42);
+      backdrop-filter: blur(4px);
+    }
+
+    #menu-card {
+      width: min(82%, 520px);
+      background: rgba(10, 15, 25, 0.86);
+      border: 1px solid rgba(122, 227, 255, 0.25);
+      border-radius: 18px;
+      box-shadow: 0 18px 36px rgba(0,0,0,0.4);
+      padding: 22px 20px 18px;
+      text-align: center;
+    }
+
+    h1 {
+      margin: 0 0 8px;
+      letter-spacing: 0.08em;
+      font-size: clamp(28px, 4vw, 44px);
+      color: var(--cyan);
+      text-transform: uppercase;
+    }
+
+    #status {
+      margin: 0 0 18px;
+      color: var(--muted);
+      line-height: 1.5;
+      font-size: 14px;
+    }
+
+    #mode-buttons {
+      display: flex;
+      justify-content: center;
+      gap: 12px;
+      flex-wrap: wrap;
+      margin-bottom: 12px;
+    }
+
+    .mode-btn {
+      border: 1px solid rgba(122, 227, 255, 0.45);
+      background: linear-gradient(180deg, rgba(32, 62, 87, 0.9), rgba(16, 25, 37, 0.92));
+      color: var(--text);
+      border-radius: 12px;
+      padding: 12px 18px;
+      font-size: 15px;
+      font-weight: 700;
+      cursor: pointer;
+      transition: 0.15s ease;
+      min-width: 180px;
+    }
+
+    .mode-btn:hover {
+      transform: translateY(-1px);
+      border-color: rgba(122, 227, 255, 0.8);
+      box-shadow: 0 0 0 1px rgba(122, 227, 255, 0.25);
+    }
+
+    .tiny {
+      display: block;
+      margin-top: 4px;
+      font-size: 11px;
+      opacity: 0.8;
+      letter-spacing: 0.06em;
+      text-transform: uppercase;
+      color: var(--gold);
+    }
+
+    #controls {
+      margin-top: 20px;
+      padding-top: 16px;
+      border-top: 1px solid rgba(255,255,255,0.1);
+      color: var(--muted);
+      font-size: 13px;
+      line-height: 1.7;
+    }
+
+    @media (max-width: 760px) {
+      #game-shell {
+        width: 100vw;
+        height: 100vh;
+        border: none;
+        border-radius: 0;
+      }
+
+      #shop {
+        width: 170px;
+      }
+
+      #hud {
+        flex-wrap: wrap;
+      }
+
+      .stat {
+        min-width: 92px;
+      }
+    }
+  </style>
+</head>
+<body>
+  <div id="game-shell">
+    <canvas id="gameCanvas" width="980" height="640"></canvas>
+
+    <div id="hud">
+      <div class="stat">
+        <span class="label">Mode</span>
+        <span class="value" id="modeText">Endless</span>
+      </div>
+      <div class="stat">
+        <span class="label">Height</span>
+        <span class="value" id="heightText">0m</span>
+      </div>
+      <div class="stat">
+        <span class="label">Tokens</span>
+        <span class="value" id="tokenText">0</span>
+      </div>
+      <div class="stat">
+        <span class="label">Best</span>
+        <span class="value" id="bestText">0m</span>
+      </div>
+      <div class="stat">
+        <span class="label">Timer</span>
+        <span class="value" id="timerText">02:00</span>
+      </div>
+    </div>
+
+    <div id="shop"></div>
+
+    <div id="overlay">
+      <div id="menu-card">
+        <h1>Skyline Hook</h1>
+        <p id="status">Shoot your grappling hook to climb higher, dodge hazards, and spend tokens on one active power-up at a time.</p>
+        <div id="mode-buttons">
+          <button class="mode-btn" id="startEndless">
+            Endless Climb
+            <span class="tiny">High score</span>
+          </button>
+          <button class="mode-btn" id="startTimed">
+            2 Minute Rush
+            <span class="tiny">Speed run</span>
+          </button>
+        </div>
+        <div id="controls">
+          Move: A / D or Arrow Keys<br />
+          Jump: W / ↑ / Space<br />
+          Hook: Click or F<br />
+          Release: R
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <script>
+    const canvas = document.getElementById('gameCanvas');
+    const ctx = canvas.getContext('2d');
+
+    const modeText = document.getElementById('modeText');
+    const heightText = document.getElementById('heightText');
+    const tokenText = document.getElementById('tokenText');
+    const bestText = document.getElementById('bestText');
+    const timerText = document.getElementById('timerText');
+    const shopEl = document.getElementById('shop');
+    const overlayEl = document.getElementById('overlay');
+    const statusEl = document.getElementById('status');
+
+    const POWER_UPS = [
+      { id: 'sprint', name: 'Sprint Boots', cost: 25, text: 'Move faster' },
+      { id: 'shield', name: 'Shield', cost: 35, text: 'Absorb one hit' },
+      { id: 'slow', name: 'Time Warp', cost: 40, text: 'Slow motion' }
+    ];
+
+    const STORAGE = {
+      tokens: 'skylineHookTokens',
+      bestEndless: 'skylineHookBestEndless',
+      bestTimed: 'skylineHookBestTimed',
+      progress: 'skylineHookProgress'
+    };
+
+    const state = {
+      mode: 'endless',
+      running: false,
+      gameOver: false,
+      timer: 120,
+      height: 0,
+      startY: 492,
+      cameraY: 0,
+      tokens: Number(localStorage.getItem(STORAGE.tokens) || 0),
+      best: {
+        endless: Number(localStorage.getItem(STORAGE.bestEndless) || 0),
+        timed: Number(localStorage.getItem(STORAGE.bestTimed) || 0)
+      },
+      progress: loadProgress(),
+      activePower: 'none',
+      currentRunTokens: 0,
+      world: {
+        platforms: [],
+        hazards: []
+      },
+      player: {
+        x: 420,
+        y: 492,
+        w: 22,
+        h: 30,
+        vx: 0,
+        vy: 0,
+        onGround: false,
+        shieldCharges: 0,
+        jumpQueued: false
+      },
+      hook: {
+        active: false,
+        x: 0,
+        y: 0,
+        targetX: 0,
+        targetY: 0
+      },
+      keys: {
+        left: false,
+        right: false,
+        jump: false,
+        up: false
+      }
+    };
+
+    function loadProgress() {
+      try {
+        const raw = localStorage.getItem(STORAGE.progress);
+        const parsed = raw ? JSON.parse(raw) : {};
+        const defaults = {};
+        for (const power of POWER_UPS) {
+          defaults[power.id] = !!parsed[power.id];
+        }
+        return {
+          unlocked: defaults,
+          active: parsed.active || 'none'
+        };
+      } catch (error) {
+        return {
+          unlocked: Object.fromEntries(POWER_UPS.map(power => [power.id, false])),
+          active: 'none'
+        };
+      }
+    }
+
+    function saveProgress() {
+      localStorage.setItem(STORAGE.progress, JSON.stringify(state.progress));
+    }
+
+    function getBestText() {
+      const best = state.best[state.mode === 'endless' ? 'endless' : 'timed'];
+      return `${best}m`;
+    }
+
+    function updateUi() {
+      modeText.textContent = state.mode === 'endless' ? 'Endless' : '2 Min Rush';
+      heightText.textContent = `${Math.floor(state.height)}m`;
+      tokenText.textContent = String(state.tokens);
+      bestText.textContent = getBestText();
+      timerText.textContent = formatTimer(state.timer);
+      renderShop();
+    }
+
+    function formatTimer(seconds) {
+      const safe = Math.max(0, Math.ceil(seconds));
+      const mins = String(Math.floor(safe / 60)).padStart(2, '0');
+      const secs = String(safe % 60).padStart(2, '0');
+      return `${mins}:${secs}`;
+    }
+
+    function rand(min, max) {
+      return Math.random() * (max - min) + min;
+    }
+
+    function clamp(value, min, max) {
+      return Math.min(max, Math.max(min, value));
+    }
+
+    function rectsOverlap(a, b) {
+      return a.x < b.x + b.w && a.x + a.w > b.x && a.y < b.y + b.h && a.y + a.h > b.y;
+    }
+
+    function resetRun(mode) {
+      state.mode = mode;
+      state.running = true;
+      state.gameOver = false;
+      state.timer = mode === 'timed' ? 120 : 999999;
+      state.height = 0;
+      state.cameraY = 0;
+      state.currentRunTokens = 0;
+      state.activePower = state.progress.active;
+
+      const startX = canvas.width * 0.5 - 30;
+      state.player.x = startX;
+      state.player.y = state.startY;
+      state.player.vx = 0;
+      state.player.vy = 0;
+      state.player.onGround = false;
+      state.player.jumpQueued = false;
+      state.player.shieldCharges = state.activePower === 'shield' ? 1 : 0;
+
+      state.hook.active = false;
+      state.hook.x = 0;
+      state.hook.y = 0;
+      state.hook.targetX = 0;
+      state.hook.targetY = 0;
+
+      buildTower();
+      overlayEl.style.display = 'none';
+      updateUi();
+    }
+
+    function buildTower() {
+      const platforms = [];
+      const hazards = [];
+      let y = 540;
+      let lastX = canvas.width * 0.35;
+
+      const firstPlatform = { x: 190, y: 540, w: 220, h: 18 };
+      platforms.push(firstPlatform);
+
+      for (let i = 0; i < 28; i++) {
+        const width = rand(100, 200);
+        const x = clamp(lastX + rand(-120, 135), 40, canvas.width - width - 40);
+        const p = { x, y: y - (i * 0), w: width, h: 18 };
+
+        platforms.push(p);
+        lastX = x;
+
+        if (Math.random() < 0.8) {
+          const spikeW = rand(26, Math.max(34, p.w * 0.6));
+          const spikeX = p.x + rand(8, p.w - spikeW - 8);
+          hazards.push({ x: spikeX, y: p.y - 12, w: spikeW, h: 12, type: 'spike' });
+        }
+
+        if (Math.random() < 0.35) {
+          const wallW = rand(16, 46);
+          const wallX = p.x + rand(16, p.w - wallW - 16);
+          hazards.push({ x: wallX, y: p.y - 18, w: wallW, h: 18, type: 'wall' });
+        }
+
+        y -= rand(76, 128);
+      }
+
+      const towerTop = y - 160;
+      const gapPlatformX = clamp(rand(110, canvas.width - 260), 40, canvas.width - 260);
+      platforms.push({ x: gapPlatformX, y: towerTop, w: rand(150, 210), h: 18 });
+
+      state.world.platforms = platforms;
+      state.world.hazards = hazards;
+    }
+
+    function applyPowerEffects() {
+      if (state.activePower === 'sprint') {
+        return 1.35;
+      }
+      if (state.activePower === 'slow') {
+        return 0.7;
+      }
+      return 1;
+    }
+
+    function fireHook() {
+      if (!state.running || state.gameOver) {
+        return;
+      }
+
+      const centerX = state.player.x + state.player.w * 0.5;
+      const centerY = state.player.y + state.player.h * 0.5;
+      let bestAnchor = null;
+      let bestDist = Infinity;
+
+      for (const platform of state.world.platforms) {
+        const sampleX = clamp(centerX, platform.x, platform.x + platform.w);
+        const sampleY = platform.y;
+        const dist = Math.hypot(sampleX - centerX, sampleY - centerY);
+        if (dist < bestDist && dist < 430) {
+          bestAnchor = { x: sampleX, y: sampleY };
+          bestDist = dist;
+        }
+      }
+
+      if (!bestAnchor) {
+        return;
+      }
+
+      state.hook.active = true;
+      state.hook.x = bestAnchor.x;
+      state.hook.y = bestAnchor.y;
+      state.hook.targetX = bestAnchor.x;
+      state.hook.targetY = bestAnchor.y;
+    }
+
+    function releaseHook() {
+      state.hook.active = false;
+    }
+
+    function handleHookMovement(dt) {
+      if (!state.hook.active) {
+        return;
+      }
+
+      const playerCenterX = state.player.x + state.player.w * 0.5;
+      const playerCenterY = state.player.y + state.player.h * 0.5;
+      const dx = state.hook.x - playerCenterX;
+      const dy = state.hook.y - playerCenterY;
+      const dist = Math.hypot(dx, dy) || 1;
+      const dirX = dx / dist;
+      const dirY = dy / dist;
+
+      const pullStrength = 820;
+      const pullBoost = state.keys.up ? 1.4 : 1;
+      state.player.vx += dirX * pullStrength * dt * pullBoost;
+      state.player.vy += dirY * pullStrength * dt * pullBoost;
+
+      if (state.keys.up) {
+        state.player.vy -= 180 * dt;
+      }
+
+      if (dist < 20) {
+        state.hook.active = false;
+      }
+    }
+
+    function playerHitsHazard() {
+      if (state.activePower === 'shield') {
+        state.activePower = 'none';
+        state.progress.active = 'none';
+        state.player.shieldCharges = 0;
+        state.player.vy = -300;
+        state.player.x += 18;
+        statusEl.textContent = 'Shield absorbed the hit!';
+        saveProgress();
+        updateUi();
+        return;
+      }
+
+      finishRun('You hit a hazard or fell too far!');
+    }
+
+    function finishRun(message) {
+      if (!state.running) {
+        return;
+      }
+
+      state.running = false;
+      state.gameOver = true;
+      const runHeight = Math.floor(state.height);
+      const earned = Math.max(1, Math.floor(runHeight / 12));
+      state.currentRunTokens = earned;
+      state.tokens += earned;
+      localStorage.setItem(STORAGE.tokens, String(state.tokens));
+
+      const key = state.mode === 'endless' ? 'endless' : 'timed';
+      state.best[key] = Math.max(state.best[key], runHeight);
+      localStorage.setItem(state.mode === 'endless' ? STORAGE.bestEndless : STORAGE.bestTimed, String(state.best[key]));
+
+      statusEl.textContent = `${message} You reached ${runHeight}m and earned ${earned} tokens.`;
+      overlayEl.style.display = 'flex';
+      updateUi();
+    }
+
+    function update(dt) {
+      const effectiveDt = dt * applyPowerEffects();
+      const moveSpeed = state.activePower === 'sprint' ? 270 : 215;
+
+      if (state.mode === 'timed') {
+        state.timer -= effectiveDt;
+        if (state.timer <= 0) {
+          state.timer = 0;
+          finishRun('Time is up!');
+          return;
+        }
+      }
+
+      const prevX = state.player.x;
+      const prevY = state.player.y;
+
+      const moveAxis = (state.keys.right ? 1 : 0) - (state.keys.left ? 1 : 0);
+      if (!state.hook.active) {
+        state.player.vx = moveAxis * moveSpeed;
+        state.player.vy += 1200 * effectiveDt;
+      } else {
+        state.player.vx *= 0.92;
+      }
+
+      if (state.keys.jump && state.player.onGround) {
+        state.player.vy = -560;
+        state.player.onGround = false;
+        state.keys.jump = false;
+      }
+
+      if (state.hook.active) {
+        handleHookMovement(effectiveDt);
+      }
+
+      state.player.x += state.player.vx * effectiveDt;
+      state.player.y += state.player.vy * effectiveDt;
+
+      state.player.x = clamp(state.player.x, 12, canvas.width - state.player.w - 12);
+
+      state.player.onGround = false;
+
+      for (const platform of state.world.platforms) {
+        if (!rectsOverlap(state.player, platform)) {
+          continue;
+        }
+
+        if (prevY + state.player.h <= platform.y + 10 && state.player.vy >= 0) {
+          state.player.y = platform.y - state.player.h;
+          state.player.vy = 0;
+          state.player.onGround = true;
+          if (state.hook.active) {
+            state.hook.active = false;
+          }
+        } else if (prevY >= platform.y + platform.h - 6 && state.player.vy < 0) {
+          state.player.y = platform.y + platform.h;
+          state.player.vy = 0;
+        } else if (prevX + state.player.w <= platform.x + 8 && state.player.vx > 0) {
+          state.player.x = platform.x - state.player.w;
+          state.player.vx = 0;
+        } else if (prevX >= platform.x + platform.w - 8 && state.player.vx < 0) {
+          state.player.x = platform.x + platform.w;
+          state.player.vx = 0;
+        }
+      }
+
+      const climbHeight = Math.max(0, (state.startY - state.player.y) / 10);
+      state.height = Math.max(state.height, climbHeight);
+      state.cameraY = Math.min(state.cameraY, state.player.y - 330);
+
+      for (const hazard of state.world.hazards) {
+        if (rectsOverlap(state.player, hazard)) {
+          playerHitsHazard();
+          return;
+        }
+      }
+
+      if (state.player.y > canvas.height + 140) {
+        finishRun('You fell off the tower!');
+        return;
+      }
+
+      if (state.player.y < -1800) {
+        state.height = Math.max(state.height, (state.startY + 1700) / 10);
+      }
+
+      updateUi();
+    }
+
+    function drawBackground() {
+      const gradient = ctx.createLinearGradient(0, 0, 0, canvas.height);
+      gradient.addColorStop(0, '#07131e');
+      gradient.addColorStop(0.42, '#123b5e');
+      gradient.addColorStop(0.8, '#1a2d41');
+      gradient.addColorStop(1, '#091423');
+      ctx.fillStyle = gradient;
+      ctx.fillRect(0, 0, canvas.width, canvas.height);
+
+      ctx.fillStyle = 'rgba(255,255,255,0.75)';
+      for (let i = 0; i < 44; i++) {
+        const x = (i * 113 + 59) % (canvas.width + 50);
+        const y = (i * 67 + 30) % 180;
+        ctx.fillRect(x, y, 2, 2);
+      }
+    }
+
+    function drawWorld() {
+      ctx.save();
+      ctx.translate(0, -state.cameraY);
+
+      for (let i = 0; i < state.world.platforms.length; i++) {
+        const p = state.world.platforms[i];
+        ctx.fillStyle = i === 0 ? '#41d6a7' : '#2e6d8b';
+        ctx.fillRect(p.x, p.y, p.w, p.h);
+        ctx.fillStyle = 'rgba(255,255,255,0.12)';
+        ctx.fillRect(p.x, p.y, p.w, 4);
+      }
+
+      for (const hazard of state.world.hazards) {
+        if (hazard.type === 'spike') {
+          const spikes = 5;
+          const spikeWidth = hazard.w / spikes;
+          ctx.fillStyle = '#ff9f8d';
+          for (let i = 0; i < spikes; i++) {
+            ctx.beginPath();
+            ctx.moveTo(hazard.x + i * spikeWidth, hazard.y + hazard.h);
+            ctx.lineTo(hazard.x + i * spikeWidth + spikeWidth / 2, hazard.y);
+            ctx.lineTo(hazard.x + (i + 1) * spikeWidth, hazard.y + hazard.h);
+            ctx.closePath();
+            ctx.fill();
+          }
+        } else {
+          ctx.fillStyle = '#ff7b7b';
+          ctx.fillRect(hazard.x, hazard.y, hazard.w, hazard.h);
+          ctx.fillStyle = 'rgba(255,255,255,0.15)';
+          ctx.fillRect(hazard.x, hazard.y, hazard.w, 3);
+        }
+      }
+
+      const hookX = state.player.x + state.player.w * 0.5;
+      const hookY = state.player.y + state.player.h * 0.5;
+      if (state.hook.active) {
+        ctx.strokeStyle = '#f7d154';
+        ctx.lineWidth = 3;
+        ctx.beginPath();
+        ctx.moveTo(hookX, hookY);
+        ctx.lineTo(state.hook.x, state.hook.y);
+        ctx.stroke();
+        ctx.fillStyle = '#f7d154';
+        ctx.beginPath();
+        ctx.arc(state.hook.x, state.hook.y, 6, 0, Math.PI * 2);
+        ctx.fill();
+      }
+
+      const player = state.player;
+      const boostColor = state.activePower === 'sprint' ? '#9af5b5' : state.activePower === 'shield' ? '#7ae3ff' : state.activePower === 'slow' ? '#af8cff' : '#ecf7ff';
+      ctx.fillStyle = boostColor;
+      ctx.fillRect(player.x, player.y, player.w, player.h);
+      ctx.fillStyle = '#0e1620';
+      ctx.fillRect(player.x + 4, player.y + 6, 5, 5);
+      ctx.fillRect(player.x + player.w - 9, player.y + 6, 5, 5);
+      ctx.fillStyle = 'rgba(255,255,255,0.22)';
+      ctx.fillRect(player.x, player.y + player.h - 6, player.w, 4);
+
+      ctx.restore();
+    }
+
+    function drawBanner() {
+      if (!state.running) {
+        return;
+      }
+
+      ctx.fillStyle = 'rgba(9, 12, 16, 0.28)';
+      ctx.fillRect(18, canvas.height - 55, 160, 30);
+      ctx.fillStyle = '#dceeff';
+      ctx.font = 'bold 14px Arial';
+      ctx.fillText(state.mode === 'timed' ? `Time: ${formatTimer(state.timer)}` : `Highest: ${Math.floor(state.height)}m`, 28, canvas.height - 35);
+    }
+
+    function render() {
+      drawBackground();
+      drawWorld();
+      drawBanner();
+    }
+
+    function renderShop() {
+      shopEl.innerHTML = '';
+
+      for (const power of POWER_UPS) {
+        const button = document.createElement('button');
+        button.className = 'shop-item';
+        if (state.progress.active === power.id) {
+          button.classList.add('active');
+        }
+
+        constowned = state.progress.unlocked[power.id];
+        const enough = state.tokens >= power.cost;
+
+        if (!owned) {
+          button.textContent = `${power.name}`;
+          const costBadge = document.createElement('span');
+          costBadge.className = 'shop-cost';
+          costBadge.textContent = power.cost;
+          button.appendChild(costBadge);
+          button.disabled = !enough;
+          button.addEventListener('click', () => {
+            if (state.tokens >= power.cost) {
+              state.tokens -= power.cost;
+              state.progress.unlocked[power.id] = true;
+              state.progress.active = power.id;
+              state.activePower = power.id;
+              localStorage.setItem(STORAGE.tokens, String(state.tokens));
+              saveProgress();
+              updateUi();
+            }
+          });
+        } else {
+          button.textContent = `${power.name}`;
+          const badge = document.createElement('span');
+          badge.className = 'shop-cost';
+          badge.textContent = state.progress.active === power.id ? 'Active' : 'Equip';
+          button.appendChild(badge);
+          button.addEventListener('click', () => {
+            state.progress.active = power.id;
+            state.activePower = power.id;
+            saveProgress();
+            updateUi();
+          });
+        }
+
+        shopEl.appendChild(button);
+      }
+    }
+
+    function setDefaultPower() {
+      state.progress.active = 'none';
+      state.activePower = 'none';
+      saveProgress();
+    }
+
+    window.addEventListener('keydown', (event) => {
+      if (event.code === 'KeyA' || event.code === 'ArrowLeft') state.keys.left = true;
+      if (event.code === 'KeyD' || event.code === 'ArrowRight') state.keys.right = true;
+      if (event.code === 'KeyW' || event.code === 'ArrowUp' || event.code === 'Space') {
+        event.preventDefault();
+        state.keys.jump = true;
+      }
+      if (event.code === 'KeyF') {
+        fireHook();
+      }
+      if (event.code === 'KeyR') {
+        releaseHook();
+      }
+      if (event.code === 'KeyU') {
+        setDefaultPower();
+        updateUi();
+      }
+    });
+
+    window.addEventListener('keyup', (event) => {
+      if (event.code === 'KeyA' || event.code === 'ArrowLeft') state.keys.left = false;
+      if (event.code === 'KeyD' || event.code === 'ArrowRight') state.keys.right = false;
+      if (event.code === 'KeyW' || event.code === 'ArrowUp' || event.code === 'Space') {
+        state.keys.jump = false;
+      }
+      if (event.code === 'ArrowUp') {
+        state.keys.up = false;
+      }
+    });
+
+    canvas.addEventListener('mousedown', (event) => {
+      if (!state.running) {
+        return;
+      }
+      const rect = canvas.getBoundingClientRect();
+      const x = ((event.clientX - rect.left) / rect.width) * canvas.width;
+      const y = ((event.clientY - rect.top) / rect.height) * canvas.height;
+      const playerCenterX = state.player.x + state.player.w * 0.5;
+      const playerCenterY = state.player.y + state.player.h * 0.5;
+      const aimX = x;
+      const aimY = y;
+
+      let bestAnchor = null;
+      let bestDist = Infinity;
+      for (const platform of state.world.platforms) {
+        const sampleX = clamp(aimX, platform.x, platform.x + platform.w);
+        const sampleY = platform.y;
+        const dist = Math.hypot(sampleX - playerCenterX, sampleY - playerCenterY);
+        if (dist < bestDist) {
+          bestAnchor = { x: sampleX, y: sampleY };
+          bestDist = dist;
+        }
+      }
+
+      if (bestAnchor && bestDist < 400) {
+        state.hook.active = true;
+        state.hook.x = bestAnchor.x;
+        state.hook.y = bestAnchor.y;
+      }
+    });
+
+    document.getElementById('startEndless').addEventListener('click', () => resetRun('endless'));
+    document.getElementById('startTimed').addEventListener('click', () => resetRun('timed'));
+
+    function loop(timestamp) {
+      if (!loop.last) {
+        loop.last = timestamp;
+      }
+      const dt = Math.min((timestamp - loop.last) / 1000, 0.032);
+      loop.last = timestamp;
+
+      if (state.running) {
+        update(dt);
+      }
+      render();
+      requestAnimationFrame(loop);
+    }
+
+    function init() {
+      localStorage.setItem(STORAGE.tokens, String(state.tokens));
+      localStorage.setItem(STORAGE.bestEndless, String(state.best.endless));
+      localStorage.setItem(STORAGE.bestTimed, String(state.best.timed));
+      state.progress.active = state.progress.active || 'none';
+      state.activePower = state.progress.active;
+      updateUi();
+      render();
+      requestAnimationFrame(loop);
+    }
+
+    init();
+  </script>
+</body>
+</html>
